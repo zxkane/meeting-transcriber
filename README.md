@@ -4,8 +4,9 @@ Claude Code plugin for multi-speaker meeting transcription with automatic speake
 
 ## Features
 
-- **Multi-speaker meetings** — CAM++ speaker diarization separates who said what, with support for `--num-speakers` hint and real name mapping
-- **Multi-language** — Chinese (Paraformer-large, CER 1.95%), English (Paraformer-en), or auto-detect (SenseVoiceSmall: zh/en/ja/ko/yue)
+- **Multi-speaker meetings** — CAM++ speaker diarization separates who said what, with `--num-speakers` hint, real name mapping, and speaker context for LLM identification
+- **Hotword biasing** — SeACo-Paraformer accepts participant names and domain terms to improve recognition accuracy (+50% on tested Chinese terms)
+- **Multi-language** — Chinese (SeACo-Paraformer, CER 1.95%), English (Paraformer-en), auto-detect (SenseVoiceSmall: zh/en/ja/ko/yue), or 99 languages (Whisper-large-v3-turbo)
 - **Long recordings** — Handles 4+ hour meetings without splitting (includes spectral clustering performance patch)
 - **LLM cleanup** — Bedrock Claude removes fillers, fixes ASR errors, polishes grammar
 - **GPU & CPU** — Auto-detects CUDA; fully functional on CPU (slower)
@@ -84,8 +85,9 @@ Audio (.m4a/.mp3) ─► ffmpeg ─► 16kHz WAV
                                   │
 Phase 1: FunASR ASR              │
   ├─ FSMN-VAD (voice detection)  │
-  ├─ Paraformer-large (ASR)      ├─► raw_transcript.json
-  ├─ CT-Transformer (punctuation)│
+  ├─ ASR model (lang-dependent)  ├─► raw_transcript.json
+  ├─ Hotword biasing (zh only)   │
+  ├─ Punctuation restoration     │
   └─ CAM++ (speaker clustering)  │
                                   │
 Phase 2: Post-process            │

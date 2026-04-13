@@ -50,3 +50,4 @@ tmp/
 *.tmp
 *_llm_cache/
 *_chunks/
+*_raw_transcript.json

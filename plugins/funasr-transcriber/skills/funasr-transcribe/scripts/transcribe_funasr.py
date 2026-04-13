@@ -2,32 +2,41 @@
 """FunASR: Multi-language meeting transcription with speaker diarization + LLM cleanup.
 
 Three-phase pipeline optimized for multi-speaker meetings:
-  Phase 1: FunASR ASR + speaker diarization
+  Phase 1: FunASR ASR + speaker diarization (+ optional hotword biasing)
   Phase 2: Post-processing (merge consecutive utterances + speaker mapping)
   Phase 3: LLM cleanup via Bedrock Claude (optional)
 
 Language presets:
-  zh      — Paraformer-large (best Chinese accuracy, CER 1.95%)
-  en      — Paraformer-en (English)
-  auto    — SenseVoiceSmall (auto-detect: zh/en/ja/ko/yue)
+  zh        — SeACo-Paraformer (best Chinese, CER 1.95%, hotword support)
+  zh-basic  — Paraformer-large (Chinese, no hotword, lighter)
+  en        — Paraformer-en (English)
+  auto      — SenseVoiceSmall (auto-detect: zh/en/ja/ko/yue)
+  whisper   — Whisper-large-v3-turbo (99 languages)
 
 Supports GPU (recommended) and CPU (slower but functional).
 First run auto-downloads models from ModelScope.
 
 Usage:
-  # Chinese meeting, 9 speakers
-  python3 transcribe_funasr.py meeting.wav --lang zh --num-speakers 9
+  # Chinese meeting with hotwords (names, terms)
+  python3 transcribe_funasr.py meeting.wav --lang zh --num-speakers 9 \\
+      --hotwords "张三 李四 ClawCon Rebase"
+
+  # Hotwords from file (one per line)
+  python3 transcribe_funasr.py meeting.wav --lang zh --hotwords hotwords.txt
 
   # English meeting
   python3 transcribe_funasr.py meeting.wav --lang en --num-speakers 4
 
-  # Auto-detect language (zh/en/ja/ko/yue)
+  # Auto-detect language
   python3 transcribe_funasr.py meeting.wav --lang auto --num-speakers 6
+
+  # Whisper for any language
+  python3 transcribe_funasr.py meeting.wav --lang whisper --num-speakers 4
 
   # With real speaker names
   python3 transcribe_funasr.py meeting.wav --speakers "Alice,Bob,Carol"
 
-  # CPU mode (auto-detected, or forced)
+  # CPU mode
   python3 transcribe_funasr.py meeting.wav --lang zh --device cpu
 
   # Raw transcription only (no LLM)
@@ -36,7 +45,7 @@ Usage:
   # Resume interrupted LLM cleanup
   python3 transcribe_funasr.py meeting.wav --skip-transcribe
 
-  # Provide speaker context JSON to help LLM identify speakers
+  # Speaker context JSON to help LLM identify speakers
   python3 transcribe_funasr.py meeting.wav --speaker-context context.json
 """
 
@@ -53,12 +62,23 @@ from pathlib import Path
 
 MODEL_PRESETS = {
     "zh": {
-        "label": "Chinese (Paraformer-large)",
+        "label": "Chinese (SeACo-Paraformer, hotword-enabled)",
+        # SeACo-Paraformer: hotword-customizable Paraformer variant
+        # Paper: "SeACo-Paraformer: A Non-Autoregressive ASR System with
+        # Flexible and Effective Hotword Customization Ability"
+        "asr": "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+        "vad": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+        "punc": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+        "spk": "iic/speech_campplus_sv_zh-cn_16k-common",
+        "hotword_support": True,
+    },
+    "zh-basic": {
+        "label": "Chinese (Paraformer-large, no hotword)",
         "asr": "iic/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
         "vad": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
         "punc": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
         "spk": "iic/speech_campplus_sv_zh-cn_16k-common",
-        "use_composite": True,  # single AutoModel with all sub-models
+        "hotword_support": False,
     },
     "en": {
         "label": "English (Paraformer-en)",
@@ -66,7 +86,7 @@ MODEL_PRESETS = {
         "vad": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
         "punc": "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
         "spk": "iic/speech_campplus_sv_zh-cn_16k-common",
-        "use_composite": True,
+        "hotword_support": False,
     },
     "auto": {
         "label": "Auto-detect (SenseVoiceSmall: zh/en/ja/ko/yue)",
@@ -74,7 +94,15 @@ MODEL_PRESETS = {
         "vad": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
         "punc": None,  # SenseVoiceSmall includes punctuation
         "spk": "iic/speech_campplus_sv_zh-cn_16k-common",
-        "use_composite": False,  # SenseVoiceSmall loaded separately, then combine with spk
+        "hotword_support": False,
+    },
+    "whisper": {
+        "label": "Multilingual (Whisper-large-v3-turbo, 99 languages)",
+        "asr": "iic/Whisper-large-v3-turbo",
+        "vad": "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+        "punc": None,  # Whisper includes punctuation
+        "spk": "iic/speech_campplus_sv_zh-cn_16k-common",
+        "hotword_support": False,
     },
 }
 
@@ -88,14 +116,15 @@ SUPPORTED_LANGS = list(MODEL_PRESETS.keys())
 def transcribe_with_funasr(audio_path: str, lang: str = "zh",
                            num_speakers: int = None,
                            device: str = "cuda:0",
-                           batch_size_s: int = 300) -> list:
+                           batch_size_s: int = 300,
+                           hotwords: str = None) -> list:
     """Run FunASR for ASR and speaker diarization.
 
     Loads language-specific models and runs the full pipeline:
     VAD -> ASR -> punctuation -> speaker embedding -> clustering.
 
-    For 'auto' mode, uses SenseVoiceSmall which auto-detects among
-    zh, en, ja, ko, yue (Cantonese).
+    For 'zh' mode with hotwords, uses SeACo-Paraformer which biases
+    recognition toward provided hotwords (names, terms, etc.).
     """
     from funasr import AutoModel
 
@@ -104,30 +133,23 @@ def transcribe_with_funasr(audio_path: str, lang: str = "zh",
     print(f"  Loading models (device={device})...")
     t0 = time.time()
 
-    if preset["use_composite"]:
-        # Paraformer-based: single AutoModel with all sub-models
-        model_kwargs = {
-            "model": preset["asr"],
-            "vad_model": preset["vad"],
-            "vad_kwargs": {"max_single_segment_time": 60000},
-            "spk_model": preset["spk"],
-            "device": device,
-            "disable_update": True,
-        }
-        if preset["punc"]:
-            model_kwargs["punc_model"] = preset["punc"]
-        model = AutoModel(**model_kwargs)
-    else:
-        # SenseVoiceSmall: load ASR separately, then combine with spk model
-        model = AutoModel(
-            model=preset["asr"],
-            vad_model=preset["vad"],
-            vad_kwargs={"max_single_segment_time": 60000},
-            spk_model=preset["spk"],
-            device=device,
-            disable_update=True,
-        )
+    model_kwargs = {
+        "model": preset["asr"],
+        "vad_model": preset["vad"],
+        "vad_kwargs": {"max_single_segment_time": 60000},
+        "spk_model": preset["spk"],
+        "device": device,
+        "disable_update": True,
+    }
+    if preset.get("punc"):
+        model_kwargs["punc_model"] = preset["punc"]
 
+    # SeACo-Paraformer: pass hotwords at model init
+    if hotwords and preset.get("hotword_support"):
+        model_kwargs["hotword"] = hotwords
+        print(f"  Hotwords: {hotwords[:100]}{'...' if len(hotwords) > 100 else ''}")
+
+    model = AutoModel(**model_kwargs)
     print(f"  Models loaded: {time.time() - t0:.1f}s")
 
     generate_kwargs = {"input": audio_path, "batch_size_s": batch_size_s}
@@ -140,7 +162,7 @@ def transcribe_with_funasr(audio_path: str, lang: str = "zh",
     elapsed = time.time() - t1
     print(f"  Transcription done: {elapsed:.1f}s")
 
-    # Parse results — handle both composite and SenseVoice output formats
+    # Parse results — handle both composite and SenseVoice/Whisper output formats
     transcript = []
     for result in res:
         if "sentence_info" in result:
@@ -152,7 +174,7 @@ def transcribe_with_funasr(audio_path: str, lang: str = "zh",
                     "text": sent.get("text", sent.get("sentence", "")),
                 })
         elif "text" in result and "timestamp" not in result:
-            # Fallback: plain text result without sentence-level info
+            # Fallback: plain text without sentence-level info
             transcript.append({
                 "speaker": 0,
                 "start_ms": 0,
@@ -362,6 +384,23 @@ def assemble_markdown(cleaned_parts: list, metadata: dict) -> str:
 
 
 # ──────────────────────────────────────────────
+# Hotword helpers
+# ──────────────────────────────────────────────
+
+def resolve_hotwords(hotwords_arg: str) -> str:
+    """Resolve --hotwords argument.
+
+    If it's a .txt file path, return the path (FunASR reads it directly).
+    Otherwise treat as space-separated hotword string.
+    """
+    if hotwords_arg and hotwords_arg.endswith(".txt") and Path(hotwords_arg).exists():
+        count = sum(1 for line in open(hotwords_arg) if line.strip())
+        print(f"  Hotwords file: {hotwords_arg} ({count} words)")
+        return hotwords_arg
+    return hotwords_arg
+
+
+# ──────────────────────────────────────────────
 # Main
 # ──────────────────────────────────────────────
 
@@ -372,11 +411,17 @@ def main():
         epilog=f"Supported languages: {', '.join(SUPPORTED_LANGS)}")
     p.add_argument("audio_file", help="Audio file (WAV recommended; M4A/MP3 also supported)")
     p.add_argument("--lang", default="zh", choices=SUPPORTED_LANGS,
-                   help="Language preset: zh (Chinese), en (English), auto (auto-detect zh/en/ja/ko/yue). Default: zh")
+                   help="Language preset (default: zh). "
+                        "zh=SeACo-Paraformer(hotword), zh-basic=Paraformer-large, "
+                        "en=Paraformer-en, auto=SenseVoiceSmall, whisper=Whisper-v3-turbo")
     p.add_argument("--num-speakers", type=int, default=None,
                    help="Number of speakers in the meeting (improves diarization accuracy)")
     p.add_argument("--speakers", type=str, default=None,
                    help="Comma-separated speaker names, e.g. 'Alice,Bob,Carol'")
+    p.add_argument("--hotwords", type=str, default=None,
+                   help="Hotwords to bias ASR (space-separated string or .txt file). "
+                        "Use for participant names, technical terms, project names. "
+                        "Only effective with --lang zh (SeACo-Paraformer)")
     p.add_argument("--device", default=None,
                    help="Device: cuda:0 / cpu (auto-detected by default)")
     p.add_argument("--batch-size", type=int, default=300,
@@ -415,7 +460,13 @@ def main():
     speaker_names = [s.strip() for s in args.speakers.split(",")] if args.speakers else None
     num_speakers = args.num_speakers or (len(speaker_names) if speaker_names else None)
 
+    # Resolve hotwords
+    hotwords = resolve_hotwords(args.hotwords) if args.hotwords else None
     preset = MODEL_PRESETS[args.lang]
+    if hotwords and not preset.get("hotword_support"):
+        print(f"  Warning: --hotwords ignored for --lang {args.lang} "
+              f"(only supported with --lang zh / SeACo-Paraformer)")
+        hotwords = None
 
     # ── Phase 1: Transcribe ──
     if args.skip_transcribe:
@@ -430,7 +481,7 @@ def main():
             print(f"Error: {audio_path} not found")
             sys.exit(1)
         transcript = transcribe_with_funasr(str(audio_path), args.lang, num_speakers,
-                                            args.device, args.batch_size)
+                                            args.device, args.batch_size, hotwords)
         with open(raw_json, "w", encoding="utf-8") as f:
             json.dump(transcript, f, ensure_ascii=False, indent=2)
         print(f"Raw transcript saved: {raw_json}")
