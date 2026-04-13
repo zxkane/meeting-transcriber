@@ -76,10 +76,20 @@ hang for hours during speaker clustering.
 
 ### 2. Audio Preprocessing
 
+Convert to 16kHz mono FLAC (lossless, ~50% smaller than WAV):
+
 ```bash
-ffmpeg -i recording.m4a -ar 16000 -ac 1 meeting.wav
+ffmpeg -i recording.m4a -ar 16000 -ac 1 -sample_fmt s16 meeting.flac
 ```
 
+| Format | 4h14m meeting | Quality |
+|--------|--------------|---------|
+| Original M4A (48kHz stereo) | 173MB | source |
+| **FLAC (16kHz mono)** | **219MB** | **lossless — recommended** |
+| WAV (16kHz mono) | 465MB | lossless but uncompressed |
+| Opus (32kbps) | 54MB | lossy |
+
+FunASR natively reads FLAC, WAV, M4A, MP3, and Opus.
 **Do NOT split long recordings** — splitting breaks speaker ID consistency.
 
 ### 3. Prepare Supporting Files (Recommended)

@@ -214,15 +214,32 @@ python3 transcribe_funasr.py meeting.wav \
 
 ## Audio Preprocessing
 
-FunASR works best with:
-- **Format**: WAV (PCM 16-bit)
-- **Sample rate**: 16kHz
-- **Channels**: mono
+FunASR works best with 16kHz mono audio. **FLAC is recommended** over WAV — lossless
+quality at ~50% the file size, and FunASR reads it natively via soundfile.
 
-Convert with ffmpeg:
 ```bash
+# Recommended: FLAC (lossless, compact)
+ffmpeg -i recording.m4a -ar 16000 -ac 1 -sample_fmt s16 meeting.flac
+
+# Alternative: WAV (lossless, larger)
 ffmpeg -i recording.m4a -ar 16000 -ac 1 meeting.wav
 ```
+
+**Important:** Use `-sample_fmt s16` when converting to FLAC — without it, ffmpeg
+may output 24-bit samples (s32/24bit) which doubles the file size with no ASR benefit.
+
+### Format comparison (4h14m meeting)
+
+| Format | Size | Quality | FunASR support |
+|--------|------|---------|---------------|
+| **FLAC (16kHz mono s16)** | **219MB** | Lossless | Native (soundfile) |
+| WAV (16kHz mono) | 465MB | Lossless | Native (soundfile) |
+| Opus (32kbps) | 54MB | Lossy | Native (soundfile) |
+| M4A/AAC (original 48kHz) | 173MB | Source | Via librosa |
+| M4A/AAC (16kHz 32kbps) | 60MB | Lossy | Via librosa |
+
+FunASR accepts all common audio formats. FLAC offers the best trade-off: lossless
+quality, reasonable size, and native reader support without librosa fallback.
 
 For long recordings, do NOT split the audio — FunASR handles arbitrarily long files
 and splitting breaks speaker consistency across segments.

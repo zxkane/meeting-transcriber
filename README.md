@@ -37,20 +37,20 @@ Add as a marketplace, then install:
 bash plugins/funasr-transcriber/skills/funasr-transcribe/scripts/setup_env.sh
 source .venv/bin/activate
 
-# 2. Convert audio to 16kHz mono WAV
-ffmpeg -i recording.m4a -ar 16000 -ac 1 meeting.wav
+# 2. Convert audio to 16kHz mono FLAC (lossless, ~50% smaller than WAV)
+ffmpeg -i recording.m4a -ar 16000 -ac 1 -sample_fmt s16 meeting.flac
 
 # 3. Chinese meeting, 9 speakers
 python3 plugins/funasr-transcriber/skills/funasr-transcribe/scripts/transcribe_funasr.py \
-  meeting.wav --lang zh --num-speakers 9
+  meeting.flac --lang zh --num-speakers 9
 
 # 4. English meeting, with real names
 python3 plugins/funasr-transcriber/skills/funasr-transcribe/scripts/transcribe_funasr.py \
-  meeting.wav --lang en --speakers "Alice,Bob,Carol,Dave"
+  meeting.flac --lang en --speakers "Alice,Bob,Carol,Dave"
 
 # 5. Auto-detect language (zh/en/ja/ko/yue)
 python3 plugins/funasr-transcriber/skills/funasr-transcribe/scripts/transcribe_funasr.py \
-  meeting.wav --lang auto --num-speakers 6
+  meeting.flac --lang auto --num-speakers 6
 ```
 
 ## Plugin Structure
