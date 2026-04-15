@@ -264,3 +264,154 @@ The `--speaker-context` file helps the LLM identify speakers and fix ASR errors:
 ```
 
 The context is injected into the LLM system prompt for each cleanup chunk.
+
+## Running on CPU-only / Low-Memory Machines
+
+Long recordings (2+ hours) on resource-constrained machines (CPU-only, ≤8 GB RAM)
+face two common failure modes. Both are silent — the process is killed mid-run
+with no output files saved.
+
+### Problem 1: Process killed by execution timeout
+
+AI coding agents (Claude Code, OpenClaw, Cursor, etc.) impose execution timeouts
+on shell commands — typically 2–10 minutes. On a 4-hour recording, CPU transcription
+takes 1.5–2 hours, well past any agent timeout. The process is silently killed.
+
+**Fix — detach from the agent's process supervision:**
+
+Option A: `systemd-run` (preferred on systemd hosts):
+
+```bash
+systemd-run --user --unit=transcribe-job \
+  --working-directory=$(pwd) \
+  bash -c 'source .venv/bin/activate && python3 transcribe_funasr.py meeting.flac \
+    --lang zh --num-speakers 9 --skip-llm > transcribe.log 2>&1'
+
+# Monitor progress
+systemctl --user status transcribe-job.service
+tail -f transcribe.log
+
+# Check result
+ls -lh *-transcript.md *_raw_transcript.json
+```
+
+`systemd-run` creates a transient systemd service fully independent of the agent
+session — it survives session resets, context pruning, and exec timeouts.
+
+> **Note:** `systemd-run --user` requires a user-level systemd instance. It may not
+> work in Docker containers or cloud VMs without `loginctl enable-linger`.
+
+Option B: `nohup` (works everywhere):
+
+```bash
+nohup bash -c 'source .venv/bin/activate && python3 transcribe_funasr.py meeting.flac \
+  --lang zh --num-speakers 9 --skip-llm' > transcribe.log 2>&1 &
+
+echo $!  # Save PID for monitoring
+tail -f transcribe.log
+```
+
+### Problem 2: OOM kill on machines with ≤8 GB RAM
+
+The `zh` preset loads 4 model components simultaneously (SeACo-Paraformer + VAD +
+Punctuation + CAM++ speaker). Peak RSS can exceed 7 GB on a 4-hour recording. On
+machines without swap, the OOM killer terminates the process silently.
+
+**Fix A — add swap before running** (requires root):
+
+```bash
+sudo fallocate -l 4G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+
+# After transcription, optionally remove swap
+sudo swapoff /swapfile && sudo rm /swapfile
+```
+
+**Fix B — use `zh-basic` instead of `zh`:**
+
+`zh-basic` (Paraformer-large) loads one fewer model component than `zh`
+(SeACo-Paraformer), reducing peak RSS by ~1–1.5 GB. Accuracy is slightly lower
+(no hotword biasing) but sufficient for most meetings:
+
+```bash
+python3 transcribe_funasr.py meeting.flac --lang zh-basic --num-speakers 9 --skip-llm
+```
+
+**Combining both fixes** (swap + `zh-basic`) reliably handles 4+ hour recordings on
+machines with as little as 8 GB RAM + 4 GB swap.
+
+### Recommended CPU workflow for long recordings
+
+```bash
+# 1. Add swap if RAM ≤ 8 GB
+sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile \
+  && sudo mkswap /swapfile && sudo swapon /swapfile
+
+# 2. Launch transcription detached from agent timeout
+nohup bash -c 'source .venv/bin/activate && python3 transcribe_funasr.py meeting.flac \
+  --lang zh-basic --num-speakers 9 --skip-llm' > transcribe.log 2>&1 &
+
+# 3. Monitor
+tail -f transcribe.log
+
+# 4. When done, resume with LLM cleanup (network-bound, runs fine under agent)
+python3 transcribe_funasr.py meeting.flac --skip-transcribe
+```
+
+## Podcast Transcription
+
+The pipeline handles podcasts and interviews with the same engine, but the workflow
+differs from meetings:
+
+### Key differences from meetings
+
+| Aspect | Meeting | Podcast / Interview |
+|--------|---------|---------------------|
+| Speakers | 3–15+, often unknown | 2–3, usually known (host + guests) |
+| Language | Usually single | May mix languages (bilingual hosts) |
+| Hotwords | Participant names + terms | Show name, guest name, topic terms |
+| Speaker context | Role-based keywords | Host asks questions, guest answers |
+| Diarization | Critical | Easier (fewer, distinct voices) |
+
+### Recommended settings
+
+```bash
+# English podcast (2 speakers, host + guest)
+python3 transcribe_funasr.py episode.flac --lang en --num-speakers 2 \
+  --speakers "Host,Guest"
+
+# Bilingual podcast (auto-detect language switches)
+python3 transcribe_funasr.py episode.flac --lang auto --num-speakers 2 \
+  --speakers "Alice,Bob"
+
+# Chinese podcast with topic hotwords
+python3 transcribe_funasr.py episode.flac --lang zh --num-speakers 3 \
+  --speakers "主持人,嘉宾A,嘉宾B" \
+  --hotwords "播客名 嘉宾全名 讨论主题关键词"
+
+# Multi-language podcast (e.g., Spanish + English)
+python3 transcribe_funasr.py episode.flac --lang whisper --num-speakers 2 \
+  --speakers "Host,Guest"
+```
+
+### Tips for podcast transcription
+
+1. **Always provide `--num-speakers`** — podcasts have a known, fixed speaker count;
+   this dramatically improves diarization accuracy with only 2–3 voices
+2. **Always provide `--speakers`** — host/guest names are known upfront
+3. **`--lang auto`** works well for bilingual shows — SenseVoiceSmall handles
+   intra-utterance language switching (zh/en/ja/ko/yue)
+4. **`--lang whisper`** for any other language or heavy code-switching
+5. **Hotwords** — for Chinese podcasts, include the show name and guest's full name;
+   for English podcasts, hotwords are usually unnecessary
+6. **`--speaker-context`** — describe the host/guest dynamic:
+   ```json
+   {
+     "Alice": "Host, asks questions, introduces topics, wraps up segments",
+     "Bob": "Guest, expert on topic X, shares personal anecdotes"
+   }
+   ```
+7. **Audio quality** — podcasts are typically studio-recorded with better SNR than
+   meetings; diarization accuracy is correspondingly higher
