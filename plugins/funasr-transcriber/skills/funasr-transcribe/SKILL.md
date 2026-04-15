@@ -8,23 +8,29 @@ description: >
   "do speech-to-text", "transcribe with speaker diarization",
   "identify speakers in audio", "transcribe Chinese audio",
   "transcribe English audio", "transcribe Japanese audio",
-  "multi-speaker transcription", or mentions FunASR, Paraformer,
-  SenseVoice, Whisper, meeting transcription, or speaker diarization.
-  Supports multi-speaker meeting transcription in Chinese, English,
-  Japanese, Korean, Cantonese, and 99 languages (via Whisper) with
-  automatic speaker diarization and hotword biasing.
-  Works on both GPU and CPU.
+  "multi-speaker transcription", "transcribe a podcast",
+  "transcribe podcast episode", "transcribe an interview",
+  "convert podcast to text", "podcast to transcript",
+  or mentions FunASR, Paraformer, SenseVoice, Whisper, meeting
+  transcription, podcast transcription, or speaker diarization.
+  Supports multi-speaker meeting and podcast transcription in Chinese,
+  English, Japanese, Korean, Cantonese, and 99 languages (via Whisper)
+  with automatic speaker diarization and hotword biasing.
+  Works on both GPU and CPU. Use this skill even when the user doesn't
+  say "transcribe" explicitly — e.g., "I have a podcast episode I need
+  turned into text" or "convert this interview recording" should trigger it.
 ---
 
 # FunASR Meeting Transcription
 
-Transcribe multi-speaker meeting recordings into structured Markdown
-with automatic speaker diarization, hotword biasing, and optional
-LLM cleanup, using the open-source FunASR pipeline.
+Transcribe multi-speaker meetings, podcasts, and interviews into
+structured Markdown with automatic speaker diarization, hotword biasing,
+and optional LLM cleanup, using the open-source FunASR pipeline.
 
-**Optimized for meetings**: handles arbitrarily long recordings
+**Optimized for long-form audio**: handles arbitrarily long recordings
 (4+ hours tested), separates speakers via CAM++ diarization,
 merges consecutive utterances, and maps speaker IDs to real names.
+Works for both large meetings (10+ speakers) and podcasts (2–3 speakers).
 
 ## Supported Languages
 
@@ -43,16 +49,24 @@ All presets include **speaker diarization** (CAM++) and **VAD** (FSMN).
 Before starting transcription, **always ask the user** the following:
 
 1. **Audio file** — path to the recording (required)
-2. **Language** — what language is the meeting in? (default: Chinese)
-3. **Number of speakers** — how many participants? (improves diarization)
-4. **Supporting files** — ask:
+2. **Type** — meeting, podcast, or interview? (affects defaults)
+3. **Language** — what language is the recording in? (default: Chinese)
+4. **Number of speakers** — how many participants? (improves diarization)
+5. **Speaker names** — for podcasts: host + guest names; for meetings: attendee list
+6. **Supporting files** — ask:
    > "Do you have any of the following to improve transcription accuracy?"
-   > - **Attendee list / participant names** — used for hotwords and speaker mapping
-   > - **Meeting agenda or topic list** — used for hotwords (project names, terms)
-   > - **Reference documents** (monthly reviews, prior meeting notes, etc.) — used to identify speakers via keyword matching after transcription
+   > - **Attendee / guest list** — used for hotwords and speaker mapping
+   > - **Meeting agenda or episode topic** — used for hotwords (terms, names)
+   > - **Reference documents** (prior notes, show notes, etc.) — used to identify speakers via keyword matching after transcription
    >
    > These are optional but significantly improve speaker identification
    > and domain-specific term recognition.
+
+**Adapt defaults based on recording type:**
+- **Meeting**: ask about supporting files, default `--lang zh`
+- **Podcast / interview**: default `--num-speakers 2`, always ask for
+  host + guest names, suggest `--speaker-context` for host/guest roles,
+  use `--lang auto` or `--lang whisper` for multilingual shows
 
 If the user provides supporting materials:
 - Extract participant names and key terms → create `hotwords.txt`
@@ -168,6 +182,7 @@ FunASR's CAM++ may merge acoustically similar speakers. To improve:
 | `--skip-transcribe` | Resume from saved `*_raw_transcript.json` |
 | `--skip-llm` | Skip LLM cleanup |
 | `--bedrock-model ID` | Override LLM model (default: `us.anthropic.claude-sonnet-4-6`) |
+| `--title "..."` | Output document title (default: "Meeting Transcript") |
 | `--clean-cache` | Delete LLM chunk cache after completion |
 
 ## Outputs
@@ -183,3 +198,25 @@ FunASR's CAM++ may merge acoustically similar speakers. To improve:
 - **`scripts/transcribe_funasr.py`** — Main transcription pipeline
 - **`scripts/setup_env.sh`** — Environment setup (venv + deps + patch)
 - **`scripts/patch_clustering.py`** — Sparse eigsh patch for long meetings
+
+## CPU-only / Low-Memory Machines
+
+Long recordings (2+ hours) on resource-constrained machines may hit two silent
+failure modes: **exec timeouts** (agent kills the process) and **OOM kills**
+(kernel kills the process when RAM is exhausted).
+
+See `references/pipeline-details.md § Running on CPU-only / Low-Memory Machines`
+for detailed workarounds:
+- Detach from agent timeouts with `systemd-run` or `nohup`
+- Prevent OOM via swap and/or `--lang zh-basic` (lighter model)
+
+## Podcast / Interview Transcription
+
+The pipeline also handles podcasts and interviews. Key differences from meetings:
+- Fewer speakers (2–3), usually known upfront — always provide `--num-speakers`
+  and `--speakers`
+- Use `--lang auto` for bilingual shows, `--lang whisper` for other languages
+- Provide `--speaker-context` describing host/guest roles for better LLM cleanup
+
+See `references/pipeline-details.md § Podcast Transcription` for recommended
+settings and examples.

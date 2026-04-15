@@ -358,7 +358,8 @@ def assemble_markdown(cleaned_parts: list, metadata: dict) -> str:
     duration_s = metadata.get("duration_ms", 0) / 1000
     h, m = int(duration_s // 3600), int((duration_s % 3600) // 60)
 
-    md = f"""# Meeting Transcript
+    title = metadata.get("title", "Meeting Transcript")
+    md = f"""# {title}
 
 ## Info
 
@@ -433,6 +434,8 @@ def main():
     p.add_argument("--bedrock-region", default="us-west-2", help="Bedrock region")
     p.add_argument("--speaker-context", type=str, default=None,
                    help="JSON file with per-speaker context to help LLM identify speakers")
+    p.add_argument("--title", type=str, default="Meeting Transcript",
+                   help="Title for the output document (default: 'Meeting Transcript')")
     p.add_argument("--skip-transcribe", action="store_true",
                    help="Skip ASR, load from *_raw_transcript.json")
     p.add_argument("--skip-llm", action="store_true", help="Skip LLM cleanup")
@@ -519,6 +522,7 @@ def main():
     duration_ms = transcript[-1]["end_ms"] - transcript[0]["start_ms"]
     actual_speakers = sorted(set(s["speaker"] for s in transcript))
     md = assemble_markdown(cleaned_parts, {
+        "title": args.title,
         "filename": audio_path.name,
         "duration_ms": duration_ms,
         "num_speakers": len(actual_speakers),
