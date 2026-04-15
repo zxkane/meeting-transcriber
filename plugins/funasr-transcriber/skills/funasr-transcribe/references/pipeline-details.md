@@ -277,7 +277,10 @@ AI coding agents (Claude Code, OpenClaw, Cursor, etc.) impose execution timeouts
 on shell commands — typically 2–10 minutes. On a 4-hour recording, CPU transcription
 takes 1.5–2 hours, well past any agent timeout. The process is silently killed.
 
-**Fix — detach from the agent's process supervision:**
+**Fix — detach the ASR phase from the agent's process supervision.** Use `--skip-llm`
+for the detached run because Phase 1 (ASR) is the CPU-intensive bottleneck; Phase 3
+(LLM cleanup) is network-bound and fast — run it afterward via `--skip-transcribe`
+under the normal agent session.
 
 Option A: `systemd-run` (preferred on systemd hosts):
 

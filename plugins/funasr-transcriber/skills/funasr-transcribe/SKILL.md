@@ -10,12 +10,15 @@ description: >
   "transcribe English audio", "transcribe Japanese audio",
   "multi-speaker transcription", "transcribe a podcast",
   "transcribe podcast episode", "transcribe an interview",
+  "convert podcast to text", "podcast to transcript",
   or mentions FunASR, Paraformer, SenseVoice, Whisper, meeting
   transcription, podcast transcription, or speaker diarization.
   Supports multi-speaker meeting and podcast transcription in Chinese,
   English, Japanese, Korean, Cantonese, and 99 languages (via Whisper)
   with automatic speaker diarization and hotword biasing.
-  Works on both GPU and CPU.
+  Works on both GPU and CPU. Use this skill even when the user doesn't
+  say "transcribe" explicitly — e.g., "I have a podcast episode I need
+  turned into text" or "convert this interview recording" should trigger it.
 ---
 
 # FunASR Meeting Transcription
@@ -58,6 +61,12 @@ Before starting transcription, **always ask the user** the following:
    >
    > These are optional but significantly improve speaker identification
    > and domain-specific term recognition.
+
+**Adapt defaults based on recording type:**
+- **Meeting**: ask about supporting files, default `--lang zh`
+- **Podcast / interview**: default `--num-speakers 2`, always ask for
+  host + guest names, suggest `--speaker-context` for host/guest roles,
+  use `--lang auto` or `--lang whisper` for multilingual shows
 
 If the user provides supporting materials:
 - Extract participant names and key terms → create `hotwords.txt`
@@ -173,6 +182,7 @@ FunASR's CAM++ may merge acoustically similar speakers. To improve:
 | `--skip-transcribe` | Resume from saved `*_raw_transcript.json` |
 | `--skip-llm` | Skip LLM cleanup |
 | `--bedrock-model ID` | Override LLM model (default: `us.anthropic.claude-sonnet-4-6`) |
+| `--title "..."` | Output document title (default: "Meeting Transcript") |
 | `--clean-cache` | Delete LLM chunk cache after completion |
 
 ## Outputs
