@@ -227,6 +227,40 @@ def _is_16k_mono(path: str) -> bool:
 # Phase 1: FunASR transcription
 # ──────────────────────────────────────────────
 
+def parse_funasr_results(res: list) -> list:
+    """Parse FunASR output into a normalized transcript list.
+
+    Handles all known FunASR result shapes:
+    1. sentence_info — composite models with speaker diarization
+    2. text + timestamp — models that produce word/segment timestamps without sentence_info
+    3. text only — plain text output (SenseVoice, Whisper)
+    """
+    transcript = []
+    for entry in res:
+        if "sentence_info" in entry:
+            for sent in entry["sentence_info"]:
+                transcript.append({
+                    "speaker": int(sent.get("spk", 0)),
+                    "start_ms": sent["start"],
+                    "end_ms": sent["end"],
+                    "text": sent.get("text", sent.get("sentence", "")),
+                })
+        elif "text" in entry:
+            timestamps = entry.get("timestamp", [])
+            start_ms = timestamps[0][0] if timestamps else 0
+            end_ms = timestamps[-1][-1] if timestamps else 0
+            transcript.append({
+                "speaker": 0,
+                "start_ms": start_ms,
+                "end_ms": end_ms,
+                "text": entry["text"],
+            })
+        else:
+            print(f"  WARNING: Unrecognized FunASR result shape, "
+                  f"keys: {sorted(entry.keys())}")
+    return transcript
+
+
 def transcribe_with_funasr(audio_path: str, lang: str = "zh",
                            num_speakers: Optional[int] = None,
                            device: str = "cuda:0",
@@ -276,25 +310,7 @@ def transcribe_with_funasr(audio_path: str, lang: str = "zh",
     elapsed = time.time() - t1
     print(f"  Transcription done: {elapsed:.1f}s")
 
-    # Parse results — handle both composite and SenseVoice/Whisper output formats
-    transcript = []
-    for result in res:
-        if "sentence_info" in result:
-            for sent in result["sentence_info"]:
-                transcript.append({
-                    "speaker": int(sent.get("spk", 0)),
-                    "start_ms": sent["start"],
-                    "end_ms": sent["end"],
-                    "text": sent.get("text", sent.get("sentence", "")),
-                })
-        elif "text" in result and "timestamp" not in result:
-            # Fallback: plain text without sentence-level info
-            transcript.append({
-                "speaker": 0,
-                "start_ms": 0,
-                "end_ms": 0,
-                "text": result["text"],
-            })
+    transcript = parse_funasr_results(res)
 
     speakers = sorted(set(s["speaker"] for s in transcript))
     print(f"  Sentences: {len(transcript)}, speakers detected: {len(speakers)}")

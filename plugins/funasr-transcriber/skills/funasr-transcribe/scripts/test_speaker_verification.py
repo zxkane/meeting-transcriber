@@ -600,6 +600,94 @@ class TestModelCacheDir:
 
 
 # ──────────────────────────────────────────────
+# transcribe_funasr: parse_funasr_results
+# ──────────────────────────────────────────────
+
+class TestParseFunasrResults:
+    def test_sentence_info_shape(self):
+        """Standard Paraformer output with sentence_info (speaker diarization)."""
+        res = [{"sentence_info": [
+            {"spk": 0, "start": 0, "end": 5000, "text": "hello"},
+            {"spk": 1, "start": 5000, "end": 10000, "text": "world"},
+        ]}]
+        transcript = tf.parse_funasr_results(res)
+        assert len(transcript) == 2
+        assert transcript[0] == {"speaker": 0, "start_ms": 0, "end_ms": 5000, "text": "hello"}
+        assert transcript[1] == {"speaker": 1, "start_ms": 5000, "end_ms": 10000, "text": "world"}
+
+    def test_sentence_info_uses_sentence_key(self):
+        """Some models use 'sentence' instead of 'text' in sentence_info."""
+        res = [{"sentence_info": [
+            {"spk": 0, "start": 0, "end": 1000, "sentence": "fallback text"},
+        ]}]
+        transcript = tf.parse_funasr_results(res)
+        assert transcript[0]["text"] == "fallback text"
+
+    def test_text_only_no_timestamp(self):
+        """SenseVoice/Whisper output: text only, no timestamps."""
+        res = [{"text": "auto detected speech"}]
+        transcript = tf.parse_funasr_results(res)
+        assert len(transcript) == 1
+        assert transcript[0]["text"] == "auto detected speech"
+        assert transcript[0]["speaker"] == 0
+        assert transcript[0]["start_ms"] == 0
+        assert transcript[0]["end_ms"] == 0
+
+    def test_text_with_timestamp_no_sentence_info(self):
+        """Result with text + timestamp but no sentence_info — previously dropped."""
+        res = [{"text": "detected speech", "timestamp": [[0, 500], [500, 1200]]}]
+        transcript = tf.parse_funasr_results(res)
+        assert len(transcript) == 1
+        assert transcript[0]["text"] == "detected speech"
+        assert transcript[0]["speaker"] == 0
+        assert transcript[0]["start_ms"] == 0
+        assert transcript[0]["end_ms"] == 1200
+
+    def test_text_with_empty_timestamp(self):
+        """Result with text + empty timestamp list."""
+        res = [{"text": "speech with empty ts", "timestamp": []}]
+        transcript = tf.parse_funasr_results(res)
+        assert len(transcript) == 1
+        assert transcript[0]["text"] == "speech with empty ts"
+        assert transcript[0]["start_ms"] == 0
+        assert transcript[0]["end_ms"] == 0
+
+    def test_unknown_shape_warns(self, capsys):
+        """Result with no recognized keys should warn, not silently drop."""
+        res = [{"unknown_key": "value"}]
+        transcript = tf.parse_funasr_results(res)
+        assert len(transcript) == 0
+        captured = capsys.readouterr()
+        assert "WARNING" in captured.out
+        assert "unrecognized" in captured.out.lower() or "unknown" in captured.out.lower()
+
+    def test_multiple_results_mixed(self):
+        """Multiple results with different shapes in one response."""
+        res = [
+            {"sentence_info": [{"spk": 0, "start": 0, "end": 5000, "text": "first"}]},
+            {"text": "second", "timestamp": [[5000, 6000], [6000, 8000]]},
+            {"text": "third"},
+        ]
+        transcript = tf.parse_funasr_results(res)
+        assert len(transcript) == 3
+        assert transcript[0]["text"] == "first"
+        assert transcript[1]["text"] == "second"
+        assert transcript[1]["end_ms"] == 8000
+        assert transcript[2]["text"] == "third"
+        assert transcript[2]["start_ms"] == 0
+
+    def test_empty_results(self):
+        """Empty results list."""
+        assert tf.parse_funasr_results([]) == []
+
+    def test_sentence_info_missing_spk_defaults_to_zero(self):
+        """sentence_info entries without 'spk' key default to speaker 0."""
+        res = [{"sentence_info": [{"start": 0, "end": 1000, "text": "no spk"}]}]
+        transcript = tf.parse_funasr_results(res)
+        assert transcript[0]["speaker"] == 0
+
+
+# ──────────────────────────────────────────────
 # transcribe_funasr: _verify_speaker_roles_via_llm
 # ──────────────────────────────────────────────
 
