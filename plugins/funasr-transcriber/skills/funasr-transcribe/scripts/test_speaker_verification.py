@@ -53,8 +53,8 @@ def four_speaker_transcript():
 @pytest.fixture
 def speaker_context_podcast():
     return {
-        "孟岩": "Host, asks questions, introduces topics",
-        "李继刚": "Guest, AI researcher, shares expertise",
+        "关羽": "Host, asks questions, introduces topics",
+        "张飞": "Guest, AI researcher, shares expertise",
     }
 
 
@@ -445,22 +445,22 @@ class TestTranscribeBuildSpeakerMap:
 class TestVerifySpeakerAssignment:
     def test_detects_chinese_self_intro_mismatch(self):
         transcript = [
-            make_segment(0, 0, 5000, "大家好我是李继刚"),
+            make_segment(0, 0, 5000, "大家好我是张飞"),
             make_segment(1, 5000, 10000, "你好"),
         ]
-        speaker_map = {0: "孟岩", 1: "李继刚"}
-        result = tf.verify_speaker_assignment(transcript, speaker_map, ["孟岩", "李继刚"])
-        assert result[0] == "李继刚"
-        assert result[1] == "孟岩"
+        speaker_map = {0: "关羽", 1: "张飞"}
+        result = tf.verify_speaker_assignment(transcript, speaker_map, ["关羽", "张飞"])
+        assert result[0] == "张飞"
+        assert result[1] == "关羽"
 
     def test_confirms_correct_assignment(self):
         transcript = [
-            make_segment(0, 0, 5000, "大家好我是孟岩"),
+            make_segment(0, 0, 5000, "大家好我是关羽"),
             make_segment(1, 5000, 10000, "你好"),
         ]
-        speaker_map = {0: "孟岩", 1: "李继刚"}
-        result = tf.verify_speaker_assignment(transcript, speaker_map, ["孟岩", "李继刚"])
-        assert result[0] == "孟岩"
+        speaker_map = {0: "关羽", 1: "张飞"}
+        result = tf.verify_speaker_assignment(transcript, speaker_map, ["关羽", "张飞"])
+        assert result[0] == "关羽"
 
     def test_english_self_intro(self):
         transcript = [
@@ -664,7 +664,7 @@ class TestVerifySpeakersMain:
         json_path, ctx_path = self._write_fixtures(
             tmp_path, two_speaker_transcript, speaker_context_podcast)
         sys.argv = ["verify_speakers.py", str(json_path),
-                     "--speakers", "孟岩,李继刚",
+                     "--speakers", "关羽,张飞",
                      "--speaker-context", str(ctx_path)]
         vs.main()
         with open(json_path, encoding="utf-8") as f:
@@ -678,7 +678,7 @@ class TestVerifySpeakersMain:
         json_path, ctx_path = self._write_fixtures(
             tmp_path, two_speaker_transcript, speaker_context_podcast)
         sys.argv = ["verify_speakers.py", str(json_path),
-                     "--speakers", "孟岩,李继刚",
+                     "--speakers", "关羽,张飞",
                      "--speaker-context", str(ctx_path), "--fix"]
         vs.main()
         with open(json_path, encoding="utf-8") as f:
@@ -692,7 +692,7 @@ class TestVerifySpeakersMain:
         json_path, ctx_path = self._write_fixtures(
             tmp_path, two_speaker_transcript, speaker_context_podcast)
         sys.argv = ["verify_speakers.py", str(json_path),
-                     "--speakers", "孟岩,李继刚",
+                     "--speakers", "关羽,张飞",
                      "--speaker-context", str(ctx_path), "--fix"]
         vs.main()
         with open(json_path, encoding="utf-8") as f:
@@ -706,7 +706,7 @@ class TestVerifySpeakersMain:
         json_path, ctx_path = self._write_fixtures(
             tmp_path, two_speaker_transcript, speaker_context_podcast)
         sys.argv = ["verify_speakers.py", str(json_path),
-                     "--speakers", "孟岩,李继刚",
+                     "--speakers", "关羽,张飞",
                      "--speaker-context", str(ctx_path)]
         with pytest.raises(SystemExit) as exc_info:
             vs.main()

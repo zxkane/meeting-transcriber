@@ -342,7 +342,7 @@ def verify_speaker_assignment(transcript: list, speaker_map: dict,
     """Auto-verify speaker assignment by detecting self-introductions.
 
     Scans the first 5 minutes of transcript. If a speaker says their own name
-    (e.g., "我是李继刚" / "I'm Alice") but is currently labeled as someone else,
+    (e.g., "我是张飞" / "I'm Alice") but is currently labeled as someone else,
     swap all speaker assignments globally.
 
     Returns the (possibly corrected) speaker_map.
@@ -478,7 +478,7 @@ def build_system_prompt(speaker_context: Optional[dict] = None,
         prompt += ("\nCorrect all ASR misrecognitions of these names. "
                    "If a speaker says their own name in the content, treat that as ground truth. "
                    "Common ASR errors for Chinese names include phonetically similar characters "
-                   "(e.g., 纪刚→李继刚, 其刚→李继刚, 李其刚→李继刚, 莫言→孟岩, 纪纲→李继刚).")
+                   "(e.g., 关于→关羽, 张非→张飞, 刘备→刘备).")
 
     # Inject speaker context (roles, background)
     if speaker_context:

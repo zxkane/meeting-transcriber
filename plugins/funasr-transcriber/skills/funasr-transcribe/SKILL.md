@@ -158,7 +158,7 @@ python3 transcribe_funasr.py meeting.wav --lang whisper --num-speakers 4
 # Full pipeline with all supporting files (best quality)
 python3 transcribe_funasr.py episode.m4a --lang zh --num-speakers 2 \
     --hotwords hotwords.txt \
-    --speakers "孟岩,李继刚" \
+    --speakers "关羽,张飞" \
     --speaker-context speaker-context.json \
     --reference show-notes.md    # any supporting text: agenda, attendee list, etc.
 
@@ -188,12 +188,12 @@ cp ${CLAUDE_PLUGIN_ROOT}/skills/funasr-transcribe/scripts/{llm_utils,verify_spea
 
 # Podcast: check if host/guest are swapped (dry-run)
 python3 verify_speakers.py podcast_raw_transcript.json \
-    --speakers "孟岩,李继刚" \
+    --speakers "关羽,张飞" \
     --speaker-context speaker-context.json
 
 # Apply the fix
 python3 verify_speakers.py podcast_raw_transcript.json \
-    --speakers "孟岩,李继刚" \
+    --speakers "关羽,张飞" \
     --speaker-context speaker-context.json --fix
 
 # Multi-speaker meeting: full reassignment

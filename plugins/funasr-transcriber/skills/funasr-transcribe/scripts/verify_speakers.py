@@ -14,12 +14,12 @@ Inputs:
 Usage:
   # Dry-run: just check if labels are swapped
   python3 verify_speakers.py podcast_raw_transcript.json \
-      --speakers "孟岩,李继刚" \
+      --speakers "关羽,张飞" \
       --speaker-context speaker-context.json
 
   # Fix in place: rewrite the JSON with corrected speaker IDs
   python3 verify_speakers.py podcast_raw_transcript.json \
-      --speakers "孟岩,李继刚" \
+      --speakers "关羽,张飞" \
       --speaker-context speaker-context.json --fix
 
   # Multi-speaker meeting: full reassignment
