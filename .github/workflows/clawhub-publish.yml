@@ -3,7 +3,7 @@ name: ClawHub Package Publish
 on:
   pull_request:
     paths:
-      - 'openclaw.plugin.json'
+      - 'package.json'
       - 'plugins/funasr-transcriber/**'
       - '.github/workflows/clawhub-publish.yml'
   push:
@@ -23,7 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - id: read
-        run: echo "version=$(jq -r .version openclaw.plugin.json)" >> "$GITHUB_OUTPUT"
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
 
   dry-run:
     needs: resolve-version
