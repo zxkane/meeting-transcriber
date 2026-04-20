@@ -14,5 +14,13 @@
     "speaker-diarization",
     "meeting-minutes",
     "podcast"
-  ]
+  ],
+  "openclaw": {
+    "compat": {
+      "pluginApi": ">=1.0.0"
+    },
+    "build": {
+      "openclawVersion": ">=0.9.0"
+    }
+  }
 }

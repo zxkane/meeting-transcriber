@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'package.json'
+      - 'openclaw.plugin.json'
       - 'plugins/funasr-transcriber/**'
       - '.github/workflows/clawhub-publish.yml'
   push:
