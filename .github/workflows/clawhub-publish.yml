@@ -32,7 +32,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-      - run: bunx clawhub skill publish plugins/funasr-transcriber/skills/funasr-transcribe --slug zxkane-audio-transcriber-funasr --version ${{ needs.resolve-version.outputs.version }} --dry-run
+      - run: bunx clawhub publish plugins/funasr-transcriber/skills/funasr-transcribe --slug zxkane-audio-transcriber-funasr --version ${{ needs.resolve-version.outputs.version }} --dry-run
 
   publish:
     needs: resolve-version
@@ -44,4 +44,4 @@ jobs:
       - run: bunx clawhub login --token "$CLAWHUB_TOKEN"
         env:
           CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
-      - run: bunx clawhub skill publish plugins/funasr-transcriber/skills/funasr-transcribe --slug zxkane-audio-transcriber-funasr --version ${{ needs.resolve-version.outputs.version }} --tags latest
+      - run: bunx clawhub publish plugins/funasr-transcriber/skills/funasr-transcribe --slug zxkane-audio-transcriber-funasr --version ${{ needs.resolve-version.outputs.version }} --tags latest
