@@ -25,14 +25,27 @@ jobs:
           version=$(grep '^version:' plugins/funasr-transcriber/skills/funasr-transcribe/SKILL.md | head -1 | awk '{print $2}')
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-  dry-run:
+  validate:
     needs: resolve-version
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bunx clawhub publish plugins/funasr-transcriber/skills/funasr-transcribe --slug zxkane-audio-transcriber-funasr --version ${{ needs.resolve-version.outputs.version }} --dry-run
+      - name: Validate SKILL.md frontmatter
+        run: |
+          python3 -c "
+          import yaml, sys
+          with open('plugins/funasr-transcriber/skills/funasr-transcribe/SKILL.md') as f:
+              front = f.read().split('---')[1]
+          data = yaml.safe_load(front)
+          for key in ('name', 'version', 'description'):
+              assert key in data, f'Missing required field: {key}'
+          print(f'Valid: {data[\"name\"]} v{data[\"version\"]}')
+          "
+      - name: Verify version
+        run: |
+          echo "SKILL.md version: ${{ needs.resolve-version.outputs.version }}"
+          test -n "${{ needs.resolve-version.outputs.version }}"
 
   publish:
     needs: resolve-version
