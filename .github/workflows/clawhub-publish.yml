@@ -33,6 +33,7 @@ jobs:
     with:
       dry_run: true
       version: ${{ needs.resolve-version.outputs.version }}
+      ref: ${{ github.event.pull_request.head.sha }}
 
   publish:
     needs: resolve-version
