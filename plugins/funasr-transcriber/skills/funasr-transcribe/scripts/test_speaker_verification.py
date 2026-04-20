@@ -451,6 +451,93 @@ class TestTranscribeBuildSpeakerMap:
         assert m == {0: "Speaker 1", 1: "Speaker 2"}
 
 
+class TestDetectMontageEnd:
+    def test_no_montage_few_segments(self):
+        transcript = [make_segment(0, 0, 30000, "long intro")]
+        assert tf.detect_montage_end(transcript) == 0
+
+    def test_no_montage_all_long(self):
+        transcript = [
+            make_segment(0, 0, 20000, "first long"),
+            make_segment(1, 20000, 45000, "second long"),
+        ]
+        assert tf.detect_montage_end(transcript) == 0
+
+    def test_detects_cold_open(self):
+        """Short clips followed by a long segment = montage."""
+        transcript = [
+            make_segment(0, 0, 3000, "clip one"),
+            make_segment(1, 3000, 6000, "clip two"),
+            make_segment(0, 6000, 9000, "clip three"),
+            make_segment(1, 9000, 12000, "clip four"),
+            make_segment(0, 12000, 30000, "welcome to the show, real intro starts"),
+        ]
+        assert tf.detect_montage_end(transcript) == 4
+
+    def test_no_montage_mixed_lengths(self):
+        """One long segment among early ones breaks the montage pattern."""
+        transcript = [
+            make_segment(0, 0, 3000, "short"),
+            make_segment(1, 3000, 20000, "long early on"),
+            make_segment(0, 20000, 23000, "short again"),
+        ]
+        assert tf.detect_montage_end(transcript) == 0
+
+    def test_many_short_clips_then_long_intro(self):
+        """Typical podcast cold open: 8 highlight clips then a long real intro."""
+        transcript = [
+            make_segment(0, 7000, 12000, "highlight clip one"),
+            make_segment(1, 17000, 21000, "highlight clip two"),
+            make_segment(0, 21000, 27000, "highlight clip three"),
+            make_segment(0, 28000, 38000, "highlight clip four"),
+            make_segment(0, 39000, 47000, "highlight clip five"),
+            make_segment(1, 48000, 50000, "highlight clip six"),
+            make_segment(0, 50000, 53000, "highlight clip seven"),
+            make_segment(0, 55000, 60000, "highlight clip eight"),
+            make_segment(1, 62000, 103000, "Hi everyone welcome to the show, this is the real intro that goes on for a while"),
+        ]
+        assert tf.detect_montage_end(transcript) == 8
+
+
+class TestRescoreMontageSpakers:
+    def test_noop_when_montage_end_zero(self):
+        transcript = [make_segment(0, 0, 5000, "hello")]
+        result = tf.rescore_montage_speakers(transcript, 0, "/fake.wav", "model")
+        assert result is transcript
+
+    def test_noop_when_montage_end_exceeds_length(self):
+        transcript = [make_segment(0, 0, 5000, "hello")]
+        result = tf.rescore_montage_speakers(transcript, 5, "/fake.wav", "model")
+        assert result is transcript
+
+    def test_noop_when_montage_end_negative(self):
+        transcript = [make_segment(0, 0, 5000, "hello")]
+        result = tf.rescore_montage_speakers(transcript, -1, "/fake.wav", "model")
+        assert result is transcript
+
+
+class TestDetectMontageEndBoundary:
+    def test_exactly_four_segments_montage(self):
+        """Minimum montage: 3 short clips + 1 long at index 3."""
+        transcript = [
+            make_segment(0, 0, 3000, "clip one"),
+            make_segment(1, 3000, 6000, "clip two"),
+            make_segment(0, 6000, 9000, "clip three"),
+            make_segment(1, 9000, 30000, "real intro starts here"),
+        ]
+        assert tf.detect_montage_end(transcript) == 3
+
+    def test_exactly_four_segments_no_montage_long_not_enough(self):
+        """4 segments but the 4th is only 14s — below 15s threshold."""
+        transcript = [
+            make_segment(0, 0, 3000, "clip one"),
+            make_segment(1, 3000, 6000, "clip two"),
+            make_segment(0, 6000, 9000, "clip three"),
+            make_segment(1, 9000, 23000, "almost long enough"),
+        ]
+        assert tf.detect_montage_end(transcript) == 0
+
+
 class TestVerifySpeakerAssignment:
     def test_detects_chinese_self_intro_mismatch(self):
         transcript = [
@@ -489,6 +576,69 @@ class TestVerifySpeakerAssignment:
         speaker_map = {0: "A", 1: "B"}
         result = tf.verify_speaker_assignment(transcript, speaker_map, ["A", "B"])
         assert result == {0: "A", 1: "B"}
+
+    def test_given_name_match_chinese(self):
+        """'我是丽华' should match full name '王丽华'."""
+        transcript = [
+            make_segment(0, 0, 5000, "嗨，朋友们好，欢迎收听我们的节目，我是丽华"),
+            make_segment(1, 5000, 10000, "好，我是某某频道的主播赵大明"),
+        ]
+        speaker_map = {0: "赵大明", 1: "王丽华"}
+        result = tf.verify_speaker_assignment(transcript, speaker_map, ["赵大明", "王丽华"])
+        assert result[0] == "王丽华"
+        assert result[1] == "赵大明"
+
+    def test_filler_between_intro_and_name(self):
+        """'我是某某频道的主播赵大明' should match despite filler words."""
+        transcript = [
+            make_segment(0, 0, 5000, "好，感谢节目的邀请，我是某某频道的主播赵大明"),
+            make_segment(1, 5000, 10000, "欢迎"),
+        ]
+        speaker_map = {0: "赵大明", 1: "王丽华"}
+        result = tf.verify_speaker_assignment(transcript, speaker_map, ["赵大明", "王丽华"])
+        assert result[0] == "赵大明"
+
+    def test_two_char_name_given_name_match(self):
+        """Two-char Chinese name: '我是磊' should match '陈磊'."""
+        transcript = [
+            make_segment(0, 0, 5000, "大家好我是磊"),
+            make_segment(1, 5000, 10000, "你好"),
+        ]
+        speaker_map = {0: "林峰", 1: "陈磊"}
+        result = tf.verify_speaker_assignment(transcript, speaker_map, ["林峰", "陈磊"])
+        assert result[0] == "陈磊"
+        assert result[1] == "林峰"
+
+    def test_name_variants_helper(self):
+        """_name_variants produces correct variants."""
+        assert tf._name_variants("王丽华") == [("王丽华", "王丽华"), ("丽华", "王丽华")]
+        assert tf._name_variants("赵大明") == [("赵大明", "赵大明"), ("大明", "赵大明")]
+        assert tf._name_variants("Alice") == [("Alice", "Alice")]
+        assert tf._name_variants("陈磊") == [("陈磊", "陈磊"), ("磊", "陈磊")]
+
+    def test_name_variants_four_char_name(self):
+        """4-char Chinese name (compound surname)."""
+        assert tf._name_variants("欧阳明月") == [("欧阳明月", "欧阳明月"), ("阳明月", "欧阳明月")]
+
+    def test_filler_exceeding_limit_no_match(self):
+        """16 chars of filler between '我是' and name should NOT match."""
+        transcript = [
+            make_segment(0, 0, 5000, "我是这个节目的特别邀请来的嘉宾主持人赵大明"),
+            make_segment(1, 5000, 10000, "你好"),
+        ]
+        speaker_map = {0: "王丽华", 1: "赵大明"}
+        result = tf.verify_speaker_assignment(transcript, speaker_map, ["王丽华", "赵大明"])
+        assert result == {0: "王丽华", 1: "赵大明"}
+
+    def test_punctuation_cutoff_prevents_cross_sentence_match(self):
+        """Punctuation between '我是' and name should block matching."""
+        transcript = [
+            make_segment(0, 0, 5000, "我是主持人。赵大明你好"),
+            make_segment(1, 5000, 10000, "你好"),
+        ]
+        speaker_map = {0: "王丽华", 1: "赵大明"}
+        result = tf.verify_speaker_assignment(transcript, speaker_map, ["王丽华", "赵大明"])
+        assert result == {0: "王丽华", 1: "赵大明"}
 
     def test_no_speaker_names_returns_unchanged(self):
         transcript = [make_segment(0, 0, 5000, "hello")]
