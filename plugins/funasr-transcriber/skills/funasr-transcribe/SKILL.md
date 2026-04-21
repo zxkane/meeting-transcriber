@@ -109,8 +109,8 @@ If the user provides supporting materials:
 ### 1. Environment Setup
 
 ```bash
-bash $SCRIPTS/setup_env.sh
-# Or force CPU:  bash $SCRIPTS/setup_env.sh cpu
+AUTO_YES=1 bash $SCRIPTS/setup_env.sh
+# Or force CPU:  AUTO_YES=1 bash $SCRIPTS/setup_env.sh cpu
 ```
 
 The setup script patches FunASR's spectral clustering for O(N²·k) performance.
