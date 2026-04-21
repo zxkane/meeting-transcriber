@@ -23,6 +23,19 @@ metadata:
   openclaw:
     requires:
       bins: ["python3", "ffmpeg"]
+    env_vars:
+      - name: AWS_REGION
+        required: false
+        description: "AWS region for Bedrock LLM cleanup (default: us-west-2). Bedrock uses the standard AWS credential chain (IAM role, SSO, ~/.aws/credentials, env vars) — no explicit keys needed."
+      - name: ANTHROPIC_API_KEY
+        required: false
+        description: "API key for Anthropic Claude LLM cleanup"
+      - name: OPENAI_API_KEY
+        required: false
+        description: "API key for OpenAI-compatible LLM cleanup"
+      - name: OPENAI_BASE_URL
+        required: false
+        description: "Base URL for OpenAI-compatible API (vLLM, Ollama, etc.)"
     emoji: "🎙️"
     homepage: "https://github.com/zxkane/audio-transcriber-funasr"
 ---
@@ -87,8 +100,8 @@ If the user provides supporting materials:
 ### 1. Environment Setup
 
 ```bash
-bash $SCRIPTS/setup_env.sh
-# Or force CPU:  bash $SCRIPTS/setup_env.sh cpu
+AUTO_YES=1 bash $SCRIPTS/setup_env.sh
+# Or force CPU:  AUTO_YES=1 bash $SCRIPTS/setup_env.sh cpu
 ```
 
 The setup script patches FunASR's spectral clustering for O(N²·k) performance.
@@ -100,6 +113,12 @@ Output files are written to the current working directory.
 
 **Prerequisites for LLM cleanup (Phase 3):** AWS credentials with Bedrock
 `InvokeModel` permission. Skip with `--skip-llm` if unavailable.
+
+> **⚠️ Data Privacy:** When LLM cleanup is enabled (the default), transcript
+> excerpts are sent to external LLM providers (AWS Bedrock, Anthropic, or
+> OpenAI depending on `--model`). Use `--skip-llm` to keep all data local.
+> Only the credentials you configure will be used — no auto-discovery of
+> unrelated credentials occurs.
 
 ```bash
 # Chinese meeting with hotwords (recommended)

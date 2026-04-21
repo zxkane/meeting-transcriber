@@ -10,12 +10,13 @@ which is O(N^2 * k) where k = number of speakers.
 Also vectorizes the p_pruning loop for additional speedup.
 
 Run this AFTER installing funasr, BEFORE transcribing long audio:
-  python3 patch_clustering.py
+  python3 patch_clustering.py        # interactive (prompts before patching)
+  python3 patch_clustering.py --yes  # non-interactive (e.g. from setup_env.sh)
 
 The patch is idempotent — safe to run multiple times.
 """
 
-import importlib
+import argparse
 import site
 import sys
 from pathlib import Path
@@ -29,8 +30,8 @@ def find_cluster_backend() -> Path:
         target = base / "models" / "campplus" / "cluster_backend.py"
         if target.exists():
             return target
-    except ImportError:
-        pass
+    except ImportError as e:
+        print(f"  Warning: funasr installed but could not be imported ({e}); searching site-packages...")
 
     # Fallback: search site-packages
     for sp in site.getsitepackages() + [site.getusersitepackages()]:
@@ -79,33 +80,63 @@ def patch_file(path: Path) -> bool:
         content = content.replace(ORIGINAL_EIGSH, PATCHED_EIGSH)
         changed = True
         print("  Patched: get_spec_embs() -> sparse eigsh")
+    elif "eigsh" in content:
+        print("  Already patched: sparse eigsh")
+    else:
+        print("  WARNING: Could not locate eigsh patch target — FunASR may have been updated")
 
     if "for i in range(A.shape[0]):" in content and "Vectorized" not in content:
         content = content.replace(ORIGINAL_PRUNING, PATCHED_PRUNING)
         changed = True
         print("  Patched: p_pruning() -> vectorized")
+    elif "Vectorized" in content:
+        print("  Already patched: vectorized pruning")
+    else:
+        print("  WARNING: Could not locate pruning patch target — FunASR may have been updated")
 
     if changed:
-        path.write_text(content, encoding="utf-8")
+        try:
+            path.write_text(content, encoding="utf-8")
+        except PermissionError:
+            print(f"  Error: Permission denied writing {path}")
+            print("  If FunASR was installed with sudo, try: sudo python3 patch_clustering.py --yes")
+            return False
         # Clear bytecode cache
         cache = path.parent / "__pycache__"
         if cache.exists():
             for pyc in cache.glob(f"{path.stem}*.pyc"):
                 pyc.unlink()
                 print(f"  Cleared: {pyc.name}")
-    else:
-        print("  Already patched or unexpected file content — skipped")
 
     return changed
 
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Patch FunASR's spectral clustering for sparse eigenvalue decomposition.")
+    parser.add_argument("-y", "--yes", action="store_true",
+                        help="Skip confirmation prompt")
+    args = parser.parse_args()
+
     target = find_cluster_backend()
     if target is None:
         print("Error: funasr not installed or cluster_backend.py not found")
         sys.exit(1)
 
     print(f"Found: {target}")
+
+    if not args.yes:
+        print(f"\nThis will modify the installed FunASR package file:\n  {target}")
+        print("The patch replaces O(N³) eigenvalue decomposition with O(N²·k) for large matrices.")
+        try:
+            resp = input("Proceed? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\nAborted (non-interactive or interrupted).")
+            sys.exit(2)
+        if resp not in ("y", "yes"):
+            print("Aborted.")
+            sys.exit(2)
+
     patch_file(target)
     print("Done.")
 
