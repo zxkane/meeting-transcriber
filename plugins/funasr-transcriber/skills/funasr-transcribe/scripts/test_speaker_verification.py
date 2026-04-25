@@ -467,14 +467,14 @@ class TestTranscribeBuildSpeakerMap:
 
     def test_solo_podcast_with_host_name(self):
         transcript = [make_segment(0, 0, 1000, "a"), make_segment(0, 2000, 3000, "b")]
-        m = tf.build_speaker_map(transcript, ["付鹏"])
-        assert m == {0: "付鹏"}
+        m = tf.build_speaker_map(transcript, ["李雷"])
+        assert m == {0: "李雷"}
 
 
 class TestExtractSpeakerNamesFromReference:
     def test_chinese_host_label(self):
-        text = "节目信息\n主播：付鹏\n更多内容..."
-        assert tf.extract_speaker_names_from_reference(text) == ["付鹏"]
+        text = "节目信息\n主播：李雷\n更多内容..."
+        assert tf.extract_speaker_names_from_reference(text) == ["李雷"]
 
     def test_host_and_guest(self):
         text = "主播：关羽\n嘉宾：张飞"
@@ -492,12 +492,12 @@ class TestExtractSpeakerNamesFromReference:
         assert tf.extract_speaker_names_from_reference(None) == []
 
     def test_stops_at_punctuation(self):
-        text = "主播：付鹏，资深宏观研究员"
-        assert tf.extract_speaker_names_from_reference(text) == ["付鹏"]
+        text = "主播：李雷，资深宏观研究员"
+        assert tf.extract_speaker_names_from_reference(text) == ["李雷"]
 
     def test_stops_at_chinese_period(self):
-        text = "主播：付鹏。本期节目我们将..."
-        assert tf.extract_speaker_names_from_reference(text) == ["付鹏"]
+        text = "主播：李雷。本期节目我们将..."
+        assert tf.extract_speaker_names_from_reference(text) == ["李雷"]
 
     def test_stops_at_ascii_period(self):
         text = "Host: Alice.senior analyst"
