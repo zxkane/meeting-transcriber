@@ -438,6 +438,21 @@ class TestTranscribeMergeConsecutive:
     def test_empty_transcript(self):
         assert tf.merge_consecutive([]) == []
 
+    def test_solo_podcast_keeps_timestamps(self):
+        # Long single-speaker run (solo podcast) with small gaps should NOT
+        # collapse into a single segment — we cap merged duration so
+        # periodic timestamps remain in the output.
+        transcript = [
+            make_segment(0, i * 10000, i * 10000 + 8000, f"sentence {i} ")
+            for i in range(60)  # 10 minutes of tightly-packed speech
+        ]
+        merged = tf.merge_consecutive(transcript, max_merge_ms=120000)
+        assert len(merged) >= 5, (
+            f"Expected periodic timestamps for solo podcast, got {len(merged)} segment(s)"
+        )
+        for seg in merged:
+            assert seg["end_ms"] - seg["start_ms"] <= 120000 + 8000
+
 
 class TestTranscribeBuildSpeakerMap:
     def test_with_names(self):
@@ -449,6 +464,52 @@ class TestTranscribeBuildSpeakerMap:
         transcript = [make_segment(0, 0, 1000, "a"), make_segment(1, 1000, 2000, "b")]
         m = tf.build_speaker_map(transcript)
         assert m == {0: "Speaker 1", 1: "Speaker 2"}
+
+    def test_solo_podcast_with_host_name(self):
+        transcript = [make_segment(0, 0, 1000, "a"), make_segment(0, 2000, 3000, "b")]
+        m = tf.build_speaker_map(transcript, ["李雷"])
+        assert m == {0: "李雷"}
+
+
+class TestExtractSpeakerNamesFromReference:
+    def test_chinese_host_label(self):
+        text = "节目信息\n主播：李雷\n更多内容..."
+        assert tf.extract_speaker_names_from_reference(text) == ["李雷"]
+
+    def test_host_and_guest(self):
+        text = "主播：关羽\n嘉宾：张飞"
+        assert tf.extract_speaker_names_from_reference(text) == ["关羽", "张飞"]
+
+    def test_english_labels(self):
+        text = "Host: Alice\nGuest - Bob"
+        assert tf.extract_speaker_names_from_reference(text) == ["Alice", "Bob"]
+
+    def test_no_labels_returns_empty(self):
+        assert tf.extract_speaker_names_from_reference("random show notes text") == []
+
+    def test_empty_input(self):
+        assert tf.extract_speaker_names_from_reference("") == []
+        assert tf.extract_speaker_names_from_reference(None) == []
+
+    def test_stops_at_punctuation(self):
+        text = "主播：李雷，资深宏观研究员"
+        assert tf.extract_speaker_names_from_reference(text) == ["李雷"]
+
+    def test_stops_at_chinese_period(self):
+        text = "主播：李雷。本期节目我们将..."
+        assert tf.extract_speaker_names_from_reference(text) == ["李雷"]
+
+    def test_stops_at_ascii_period(self):
+        text = "Host: Alice.senior analyst"
+        assert tf.extract_speaker_names_from_reference(text) == ["Alice"]
+
+    def test_stops_at_parenthesis(self):
+        text = "Host: Alice (senior analyst)\nGuest: Bob"
+        assert tf.extract_speaker_names_from_reference(text) == ["Alice", "Bob"]
+
+    def test_dedup_across_host_and_guest(self):
+        text = "主播：Alice\n嘉宾：Alice"
+        assert tf.extract_speaker_names_from_reference(text) == ["Alice"]
 
 
 class TestDetectMontageEnd:
