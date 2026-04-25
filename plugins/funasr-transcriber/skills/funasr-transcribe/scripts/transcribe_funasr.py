@@ -746,7 +746,11 @@ Rules:
 3. Merge stuttered/repeated expressions into fluent sentences
 4. Fix obvious ASR errors based on context
 5. Preserve original meaning — do not add content not in the original
-6. Keep timestamps unchanged
+6. Preserve timestamps: emit a [HH:MM:SS] marker every ~2 minutes of content \
+at minimum, using the closest original segment's timestamp. This rule applies \
+even when the speaker does not change — never collapse a long stretch of a \
+single speaker into one timestamped block. Keep the original timestamp values \
+unchanged; do not invent or interpolate new times.
 7. Preserve technical terms and proper nouns
 8. Output cleaned text only, format: [timestamp] Name: content
 9. Detect montage/highlight-reel sections at the start or end of the recording \
