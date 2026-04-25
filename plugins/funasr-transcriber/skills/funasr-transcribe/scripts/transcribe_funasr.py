@@ -325,14 +325,23 @@ def transcribe_with_funasr(audio_path: str, lang: str = "zh",
 # Phase 2: Post-processing
 # ──────────────────────────────────────────────
 
-def merge_consecutive(transcript: list, gap_ms: int = 2000) -> list:
-    """Merge consecutive sentences from the same speaker within gap_ms."""
+def merge_consecutive(transcript: list, gap_ms: int = 2000,
+                      max_merge_ms: int = 120000) -> list:
+    """Merge consecutive sentences from the same speaker within gap_ms.
+
+    Caps merged segment duration at max_merge_ms so long single-speaker
+    stretches (e.g. solo podcasts) retain periodic timestamps instead of
+    collapsing into one timestamp-less block.
+    """
     if not transcript:
         return []
     merged = []
     cur = dict(transcript[0])
     for sent in transcript[1:]:
-        if sent["speaker"] == cur["speaker"] and (sent["start_ms"] - cur["end_ms"]) < gap_ms:
+        same_speaker = sent["speaker"] == cur["speaker"]
+        small_gap = (sent["start_ms"] - cur["end_ms"]) < gap_ms
+        under_cap = (sent["end_ms"] - cur["start_ms"]) < max_merge_ms
+        if same_speaker and small_gap and under_cap:
             cur["end_ms"] = sent["end_ms"]
             cur["text"] += sent["text"]
         else:
@@ -340,6 +349,42 @@ def merge_consecutive(transcript: list, gap_ms: int = 2000) -> list:
             cur = dict(sent)
     merged.append(cur)
     return merged
+
+
+def extract_speaker_names_from_reference(reference_text: Optional[str]) -> list:
+    """Best-effort extraction of speaker names from show notes / reference text.
+
+    Recognizes common Chinese/English podcast role labels like
+    "主播：付鹏", "嘉宾: Alice", "Host: Bob", "Guest — Carol". Host is
+    listed first so single-speaker recordings resolve to the host name.
+    Returns an empty list if no labels match.
+    """
+    if not reference_text:
+        return []
+
+    hosts, guests = [], []
+    # Name class: CJK chars, ASCII letters/digits, and a few name punctuations
+    # (·-·). Stops at anything else — whitespace, sentence terminators,
+    # parentheses, brackets, quotes, commas. Keeps us safe from
+    # "付鹏.本期..." or "Alice (senior analyst)" being captured as names.
+    name_re = r"[\w一-鿿·\-]{1,30}"
+    role_patterns = [
+        (r"(?:主播|主持[人员]?|Host)\s*[:：\-—–]\s*(" + name_re + ")", hosts),
+        (r"(?:嘉宾|Guest)\s*[:：\-—–]\s*(" + name_re + ")", guests),
+    ]
+    for pat, bucket in role_patterns:
+        for m in re.finditer(pat, reference_text, re.IGNORECASE):
+            name = m.group(1).strip()
+            if name and name not in bucket:
+                bucket.append(name)
+
+    # Dedup across buckets so "主播：Alice\n嘉宾：Alice" doesn't produce
+    # duplicate speaker names downstream.
+    ordered = []
+    for n in hosts + guests:
+        if n not in ordered:
+            ordered.append(n)
+    return ordered
 
 
 def build_speaker_map(transcript: list, speakers: Optional[list] = None) -> dict:
@@ -1081,6 +1126,22 @@ def main():
             print(f"  Reference loaded: {ref_path} ({len(reference_text)} chars)")
         else:
             print(f"  Warning: --reference file not found: {args.reference}")
+
+    # Fallback: if --speakers not provided but reference has role labels
+    # (主播/嘉宾/Host/Guest), use those so the final output shows real names
+    # instead of "Speaker 1". Essential for solo podcasts where the host
+    # name only appears in the show notes.
+    if not speaker_names and reference_text:
+        extracted = extract_speaker_names_from_reference(reference_text)
+        if extracted:
+            speaker_names = extracted
+            if num_speakers is None:
+                num_speakers = len(extracted)
+                if len(extracted) == 1:
+                    print(f"  Note: only 1 speaker label ('{extracted[0]}') found in "
+                          f"reference. If the recording has more speakers, pass "
+                          f"--num-speakers explicitly.")
+            print(f"  Speaker names from reference: {', '.join(extracted)}")
 
     # ── Phase 0: Audio preprocessing ──
     asr_audio = str(audio_path)
