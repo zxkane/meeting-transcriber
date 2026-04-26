@@ -788,7 +788,7 @@ class TestBuildSystemPrompt:
     def test_base_prompt(self):
         prompt = tf.build_system_prompt()
         assert "transcript editor" in prompt
-        assert "Keep timestamps unchanged" in prompt
+        assert "Preserve timestamps" in prompt
 
     def test_with_speaker_names(self):
         prompt = tf.build_system_prompt(speaker_names=["Alice", "Bob"])
@@ -809,6 +809,22 @@ class TestBuildSystemPrompt:
         long_ref = "x" * 5000
         prompt = tf.build_system_prompt(reference_text=long_ref)
         assert "[...truncated]" in prompt
+
+    def test_prompt_instructs_to_preserve_periodic_timestamps(self):
+        # Solo-speaker bug: when a 15-minute chunk has only one speaker the LLM
+        # used to collapse the entire chunk into a single timestamped block,
+        # losing every intermediate anchor. The prompt must require the model
+        # to keep a periodic timestamp (every ~2 minutes) even when the speaker
+        # does not change.
+        prompt = tf.build_system_prompt()
+        low = prompt.lower()
+        assert "every" in low and "minute" in low, (
+            "prompt must require LLM to emit a timestamp every ~2 minutes"
+        )
+        # Must explicitly cover the single-speaker case
+        assert "speaker" in low and ("same" in low or "single" in low or "solo" in low), (
+            "prompt must mention that the rule applies even when speaker is unchanged"
+        )
 
 
 # ──────────────────────────────────────────────
