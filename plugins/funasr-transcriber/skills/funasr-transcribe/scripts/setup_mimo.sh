@@ -36,13 +36,19 @@ else
     echo "[1/4] MiMo repo already present at $MIMO_REPO_DIR — skipping clone."
 fi
 
-# 2. Install MiMo's Python dependencies
+# 2. Install MiMo's Python dependencies. Upstream requirements.txt is
+# incomplete — the runtime code imports einops (via internal audio modules)
+# and addict (via the 3D-Speaker gender classifier path) without declaring
+# them. Install both alongside the declared deps so first-run inference
+# doesn't fail on ModuleNotFoundError.
 if [ -f "$MIMO_REPO_DIR/requirements.txt" ]; then
     echo "[2/4] Installing MiMo requirements..."
     pip install -q -r "$MIMO_REPO_DIR/requirements.txt"
 else
     echo "  WARNING: $MIMO_REPO_DIR/requirements.txt missing — skipping."
 fi
+echo "  Installing additional runtime deps (upstream missed these): einops, addict"
+pip install -q einops addict
 
 # 3. Install flash-attn. Prefer the pre-built wheel matching the installed
 # torch + python + cxx11abi. This works on CUDA-driver-only hosts (most AWS

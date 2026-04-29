@@ -153,7 +153,13 @@ def _load_mimo(weights_path: str):
     from src.mimo_audio.mimo_audio import MimoAudio  # type: ignore
     model_dir = _resolve_hf_snapshot("XiaomiMiMo/MiMo-V2.5-ASR", weights_path)
     tokenizer_dir = _resolve_hf_snapshot("XiaomiMiMo/MiMo-Audio-Tokenizer", weights_path)
-    return MimoAudio(model_path=model_dir, tokenizer_path=tokenizer_dir)
+    # Upstream MiMo's __init__ signature is
+    #   (model_path, mimo_audio_tokenizer_path, device=None)
+    # — the kwarg is *not* `tokenizer_path` despite how the README once
+    # showed it. Keep this name in sync with upstream
+    # .venv/mimo/src/mimo_audio/mimo_audio.py at import time.
+    return MimoAudio(model_path=model_dir,
+                     mimo_audio_tokenizer_path=tokenizer_dir)
 
 
 def _free_mimo(mimo) -> None:
