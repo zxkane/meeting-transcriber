@@ -471,3 +471,32 @@ python3 transcribe_funasr.py episode.flac --lang whisper --num-speakers 2 \
    versions). Download from the web interface for complete files. The script's
    Phase 0 duration validation catches conversion truncation but cannot detect
    a source file that is already incomplete.
+
+## `--lang mimo` — Xiaomi MiMo-V2.5-ASR (local, GPU)
+
+MiMo is an 8B-parameter LLM-based ASR model from Xiaomi. It outputs plain text
+with no per-sentence timestamps and no speaker labels. The `funasr-transcribe`
+skill wraps it in a VAD + speaker-clustering sandwich so output format matches
+the FunASR presets:
+
+```
+Phase 1a  FSMN VAD           → [(start_ms, end_ms), ...]
+Phase 1b  MiMo asr_sft()     → text per VAD segment
+Phase 1c  CAM++ + KMeans     → speaker ID per VAD segment
+```
+
+Files: `scripts/mimo_asr.py` (orchestrator), `scripts/setup_mimo.sh` (installer).
+
+### Expected RTF
+
+On a single A100 (40 GB), 4h audio → ~24 min wall clock for Phase 1 (RTF ≈
+0.1). Compare to `--lang zh` on the same GPU at RTF ≈ 0.02–0.05. Trade speed
+for reported accuracy gains on dialects, code-switching, and lyrics.
+
+### Resume (`--resume-mimo`)
+
+Segment-level failures (OOM, CUDA error) retry 3× with
+[0.5s, 2s, 5s] backoff after `gc.collect()` + `torch.cuda.empty_cache()`. If all
+retries fail, a `*_mimo_partial.json` file captures VAD segments, completed
+transcriptions, and the failed index. `--resume-mimo` picks up from the failed
+segment, verifying audio SHA256 + `--mimo-audio-tag` match before continuing.

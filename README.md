@@ -13,6 +13,10 @@ Claude Code plugin for multi-speaker meeting and podcast transcription with auto
 - **LLM cleanup** — Bedrock Claude removes fillers, fixes ASR errors, polishes grammar
 - **GPU & CPU** — Auto-detects CUDA; fully functional on CPU with [low-memory guidance](plugins/funasr-transcriber/skills/funasr-transcribe/references/pipeline-details.md#running-on-cpu-only--low-memory-machines)
 - **Resume support** — Checkpoint at every phase for interrupted runs
+- **Local MiMo-V2.5-ASR support (new in 1.7.0):** opt-in `--lang mimo` runs
+  Xiaomi's 8B ASR model locally on a CUDA GPU for dialect-heavy or
+  code-switching audio, with diarization preserved via FSMN VAD + CAM++.
+  Requires Python 3.12, ≥20 GB VRAM, and `INSTALL_MIMO=1 bash setup_env.sh`.
 
 ## Installation
 
