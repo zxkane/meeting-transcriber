@@ -1,6 +1,6 @@
 ---
 name: funasr-transcribe
-version: 1.6.0
+version: 1.7.0
 description: >
   This skill should be used when the user explicitly asks to "transcribe a meeting",
   "transcribe audio", "transcribe a meeting recording",
@@ -59,12 +59,14 @@ SCRIPTS=${CLAUDE_PLUGIN_ROOT}/skills/funasr-transcribe/scripts
 | `en` | Paraformer-en | English | No |
 | `auto` | SenseVoiceSmall | Auto-detect: zh/en/ja/ko/yue | No |
 | `whisper` | Whisper-large-v3-turbo | 99 languages | No |
+| `mimo` | MiMo-V2.5-ASR (local 8B, GPU-only) | zh/en/code-switch/dialects | No |
 
 All presets include **speaker diarization** (CAM++) and **VAD** (FSMN).
+`mimo` reuses the FSMN VAD + CAM++ stack around MiMo's text output.
 
 > **Diarization caveat:** `auto` and `whisper` do not output per-sentence timestamps,
-> so speaker diarization does not work with these presets. Use `zh`, `zh-basic`, or
-> `en` when speaker identification is needed (e.g., podcasts, meetings).
+> so speaker diarization does not work with these presets. Use `zh`, `zh-basic`,
+> `en`, or `mimo` when speaker identification is needed (e.g., podcasts, meetings).
 
 ## Workflow
 
@@ -234,6 +236,51 @@ validates that no audio is lost (detects silent truncation).
 
 **Do NOT split long recordings** — splitting breaks speaker ID consistency.
 
+## MiMo-V2.5-ASR (optional, GPU-only)
+
+`--lang mimo` runs Xiaomi's
+[MiMo-V2.5-ASR](https://huggingface.co/XiaomiMiMo/MiMo-V2.5-ASR) locally on a
+CUDA GPU. Use it when:
+- You want to evaluate MiMo against Paraformer on Chinese audio.
+- The recording has heavy code-switching, dialects (Wu, Cantonese, Hokkien,
+  Sichuanese), lyrics, or rare proper nouns that other presets mis-transcribe.
+
+**Requirements:**
+- CUDA ≥12.0 and **≥20 GB VRAM** (16 GB cards OOM during inference).
+- Python 3.12 (enforced by `setup_env.sh`).
+- ~20 GB weight download (one-time) and `flash-attn==2.7.4.post1` compile
+  (needs `nvcc` from the CUDA toolkit, takes 10–30 min).
+
+**Install (opt-in):**
+
+```bash
+# One-time: install MiMo on top of the standard environment
+AUTO_YES=1 INSTALL_MIMO=1 \
+    MIMO_WEIGHTS_PATH=/mnt/models/hf \
+    bash $SCRIPTS/setup_env.sh
+```
+
+**Run:**
+
+```bash
+python3 $SCRIPTS/transcribe_funasr.py podcast.m4a \
+    --lang mimo --num-speakers 2 \
+    --mimo-weights-path /mnt/models/hf
+```
+
+**Resume after failure:**
+
+```bash
+python3 $SCRIPTS/transcribe_funasr.py podcast.m4a \
+    --lang mimo --resume-mimo --mimo-weights-path /mnt/models/hf
+```
+
+**Limitations:**
+- No hotword biasing (MiMo has no API for it — `--hotwords` is ignored).
+- No CPU fallback.
+- Inference is slower than Paraformer on the same GPU (8B model vs ~0.3B);
+  expect RTF around 0.1–0.2 on an A100.
+
 ## Key Flags
 
 | Flag | Purpose |
@@ -258,6 +305,10 @@ validates that no audio is lost (detects silent truncation).
 | `--clean-cache` | Delete LLM chunk cache after completion |
 | `--output PATH` | Custom output file path |
 | `--model-cache-dir` | ModelScope model cache directory (~3GB, default: `~/.cache/modelscope/`) |
+| `--mimo-audio-tag` | MiMo language hint: `<chinese>` (default), `<english>`, `<auto>` |
+| `--mimo-batch N` | Concurrent VAD segments per MiMo call (default 1; H100/80GB can go higher) |
+| `--mimo-weights-path DIR` | Cache dir for MiMo weights (default: `$HF_HOME` → `~/.cache/huggingface`) |
+| `--resume-mimo` | Resume MiMo Phase 1 from `*_mimo_partial.json` after a mid-run failure |
 
 ## Outputs
 
