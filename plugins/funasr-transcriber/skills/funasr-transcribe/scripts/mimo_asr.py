@@ -27,8 +27,26 @@ from typing import Optional, Sequence
 
 
 def require_cuda_and_vram(min_gb: int = 20) -> None:
-    """Pre-flight: require a CUDA device with at least min_gb VRAM. Not implemented yet."""
-    raise NotImplementedError
+    """Pre-flight: require a CUDA device with at least min_gb VRAM.
+
+    Raises:
+        RuntimeError: if CUDA is unavailable or VRAM is below min_gb.
+    """
+    import torch  # imported lazily so test can patch sys.modules
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "--lang mimo requires a CUDA GPU. CUDA is not available "
+            "on this machine. Use --lang zh for CPU."
+        )
+    props = torch.cuda.get_device_properties(0)
+    total_gb = props.total_memory / (1024**3)
+    if total_gb < min_gb:
+        raise RuntimeError(
+            f"--lang mimo requires ≥{min_gb} GB VRAM. "
+            f"Detected: {props.name} ({total_gb:.1f} GB). "
+            f"MiMo-V2.5-ASR is 8B params in fp16 + tokenizer + KV cache. "
+            f"Use --lang zh for low-VRAM GPUs."
+        )
 
 
 def require_mimo_installed(weights_path: str, repo_path: str) -> None:
