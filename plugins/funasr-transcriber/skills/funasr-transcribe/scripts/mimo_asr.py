@@ -63,26 +63,20 @@ def require_mimo_installed(weights_path: str, repo_path: str) -> None:
             f"Run: INSTALL_MIMO=1 bash $SCRIPTS/setup_env.sh"
         )
 
-    import huggingface_hub as _hf
-    # Access .errors via sys.modules so patch.dict mocks stay in effect
-    _hf_errors = sys.modules.get("huggingface_hub.errors", None)
-    if _hf_errors is None:
-        from huggingface_hub import errors as _hf_errors  # type: ignore[no-redef]
-    LocalEntryNotFoundError = _hf_errors.LocalEntryNotFoundError
+    from huggingface_hub import snapshot_download
+    from huggingface_hub.errors import LocalEntryNotFoundError
     for repo_id in ("XiaomiMiMo/MiMo-V2.5-ASR",
                     "XiaomiMiMo/MiMo-Audio-Tokenizer"):
         try:
-            _hf.snapshot_download(repo_id, cache_dir=weights_path,
-                                  local_files_only=True)
-        except Exception as e:  # noqa: BLE001
-            if isinstance(e, LocalEntryNotFoundError):
-                raise RuntimeError(
-                    f"MiMo weights not found at {weights_path} "
-                    f"(missing: {repo_id}). "
-                    f"Run: INSTALL_MIMO=1 MIMO_WEIGHTS_PATH={weights_path} "
-                    f"bash $SCRIPTS/setup_env.sh"
-                ) from e
-            raise
+            snapshot_download(repo_id, cache_dir=weights_path,
+                              local_files_only=True)
+        except LocalEntryNotFoundError as e:
+            raise RuntimeError(
+                f"MiMo weights not found at {weights_path} "
+                f"(missing: {repo_id}). "
+                f"Run: INSTALL_MIMO=1 MIMO_WEIGHTS_PATH={weights_path} "
+                f"bash $SCRIPTS/setup_env.sh"
+            ) from e
 
 
 def transcribe_with_mimo(audio_path: str,

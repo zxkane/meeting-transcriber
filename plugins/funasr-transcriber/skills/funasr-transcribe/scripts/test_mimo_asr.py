@@ -70,9 +70,7 @@ class TestRequireMimoInstalled:
         repo.mkdir()
         (repo / "src").mkdir()  # looks like a clone
 
-        class LocalEntryNotFoundError(Exception):
-            pass
-
+        from huggingface_hub.errors import LocalEntryNotFoundError
         fake_hf = MagicMock()
         fake_hf.snapshot_download.side_effect = LocalEntryNotFoundError("not cached")
         fake_errs = MagicMock()
