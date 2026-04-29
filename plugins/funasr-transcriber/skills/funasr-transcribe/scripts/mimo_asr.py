@@ -117,6 +117,30 @@ def infer_with_retry(mimo, audio_path: str, audio_tag: str,
     ) from last_exc
 
 
+def _format_time(ms: int) -> str:
+    s = ms // 1000
+    return f"{s // 3600:02d}:{(s % 3600) // 60:02d}:{s % 60:02d}"
+
+
+def _load_mimo(weights_path: str):
+    """Resolve snapshot dirs and instantiate MimoAudio. Isolated for test mocking."""
+    from huggingface_hub import snapshot_download
+    venv_root = Path(sys.prefix)
+    sys.path.insert(0, str(venv_root / "mimo"))
+    from src.mimo_audio.mimo_audio import MimoAudio  # type: ignore
+    model_dir = snapshot_download("XiaomiMiMo/MiMo-V2.5-ASR",
+                                  cache_dir=weights_path, local_files_only=True)
+    tokenizer_dir = snapshot_download("XiaomiMiMo/MiMo-Audio-Tokenizer",
+                                      cache_dir=weights_path, local_files_only=True)
+    return MimoAudio(model_path=model_dir, tokenizer_path=tokenizer_dir)
+
+
+def _free_mimo(mimo) -> None:
+    """Release MiMo VRAM so CAM++ can load in the same process."""
+    del mimo
+    _cuda_cleanup()
+
+
 def transcribe_with_mimo(audio_path: str,
                          num_speakers: Optional[int] = None,
                          audio_tag: str = "<chinese>",
@@ -128,8 +152,97 @@ def transcribe_with_mimo(audio_path: str,
                          vad_model_id: str = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
                          repo_path: Optional[str] = None,
                          backoffs: Sequence[float] = (0.5, 2.0, 5.0)) -> list:
-    """Phase 1 MiMo path: VAD -> MiMo ASR -> CAM++ speaker labels. Not implemented yet."""
-    raise NotImplementedError
+    """Phase 1 MiMo path: VAD -> per-segment MiMo ASR -> CAM++ speaker labels.
+
+    Returns a sentence_info-shaped list of
+    {speaker: int, start_ms: int, end_ms: int, text: str}
+    matching the format produced by the FunASR presets, so downstream
+    Phase 2/3 code is identical regardless of --lang.
+    """
+    weights_path = weights_path or os.environ.get("HF_HOME") \
+        or str(Path.home() / ".cache" / "huggingface")
+    repo_path = repo_path or str(Path(sys.prefix) / "mimo")
+
+    # 1. Preflights — cheap, fail fast before any load
+    require_cuda_and_vram(min_gb=20)
+    require_mimo_installed(weights_path, repo_path)
+
+    # 2. Resolve state (resume or fresh VAD)
+    audio_p = Path(audio_path)
+    partial_path = audio_p.with_name(f"{audio_p.stem}_mimo_partial.json")
+    audio_hash = compute_audio_hash(audio_path)
+
+    if resume:
+        state = load_partial(partial_path, audio_hash, audio_tag)
+        vad_segments = [tuple(s) for s in state["vad_segments"]]
+        completed = {c["idx"]: c for c in state["completed"]}
+        start_idx = state["failed_at"]["idx"]
+        print(f"  Resuming from {partial_path.name} "
+              f"({len(completed)}/{len(vad_segments)} completed)")
+    else:
+        print(f"[Phase 1a] VAD segmentation (FSMN)...")
+        vad_segments = run_fsmn_vad(audio_path, vad_model_id, device)
+        print(f"  Detected {len(vad_segments)} segments")
+        completed = {}
+        start_idx = 0
+
+    # 3. Load MiMo
+    print(f"[Phase 1b] MiMo ASR (local, GPU)")
+    print(f"  Loading MiMo from {weights_path}...")
+    t_load = time.time()
+    mimo = _load_mimo(weights_path)
+    print(f"  Loaded in {time.time() - t_load:.1f}s")
+
+    # 4. Per-segment loop with retry
+    t0 = time.time()
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for i in range(start_idx, len(vad_segments)):
+                if i in completed:
+                    continue
+                s_ms, e_ms = vad_segments[i]
+                chunk_wav = extract_segment(audio_path, s_ms, e_ms, tmpdir)
+                try:
+                    text = infer_with_retry(mimo, chunk_wav, audio_tag,
+                                            max_retries=3, backoffs=list(backoffs))
+                except RuntimeError as e:
+                    # Final failure: persist partial then re-raise
+                    save_partial(
+                        partial_path, audio_hash, audio_tag, weights_path,
+                        [list(v) for v in vad_segments],
+                        [completed[k] for k in sorted(completed)],
+                        failed_at={"idx": i, "start_ms": s_ms, "error": str(e)},
+                    )
+                    raise RuntimeError(
+                        f"MiMo inference failed at segment {i}/{len(vad_segments)} "
+                        f"({_format_time(s_ms)}): {e}. "
+                        f"Partial saved: {partial_path.name}. "
+                        f"Resume with: --resume-mimo"
+                    ) from e
+                completed[i] = {"idx": i, "text": text,
+                                "start_ms": s_ms, "end_ms": e_ms}
+                print(f"  [{i+1:3d}/{len(vad_segments)}] {_format_time(s_ms)} "
+                      f"({e_ms - s_ms}ms) -> {text[:40]}")
+    finally:
+        _free_mimo(mimo)
+
+    wall = time.time() - t0
+    if vad_segments:
+        duration = (vad_segments[-1][1] - vad_segments[0][0]) / 1000
+        if duration > 0:
+            print(f"  MiMo inference: {wall:.1f}s (RTF {wall / duration:.3f})")
+
+    # 5. Speaker clustering on the same VAD segments
+    print(f"[Phase 1c] CAM++ speaker clustering...")
+    segments = [completed[i] for i in range(len(vad_segments))]
+    segments = assign_speakers_via_cam(segments, audio_path, num_speakers,
+                                       spk_model_id, device)
+
+    # 6. Clean up partial on success
+    if partial_path.exists():
+        partial_path.unlink()
+
+    return segments
 
 
 def _extract_speaker_embedding(start_ms: int, end_ms: int, spk_model,

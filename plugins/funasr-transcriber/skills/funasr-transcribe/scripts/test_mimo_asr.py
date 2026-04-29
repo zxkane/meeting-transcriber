@@ -256,3 +256,124 @@ class TestAssignSpeakersViaCam:
         assert [s["speaker"] for s in out] == [out[0]["speaker"], out[1]["speaker"],
                                                 out[0]["speaker"], out[1]["speaker"]]
         assert out[0]["speaker"] != out[1]["speaker"]
+
+
+class TestTranscribeWithMimo:
+    def _mock_heavy_deps(self, vad_segments, asr_outputs):
+        """Return a context manager stack that mocks every heavy dep.
+
+        asr_outputs: list of str or Exception instances (one per call to asr_sft).
+        """
+        fake_mimo_module = MagicMock()
+        fake_mimo_instance = MagicMock()
+        # each asr_sft call pops from asr_outputs
+        def asr_sft(wav, audio_tag):
+            val = asr_outputs.pop(0)
+            if isinstance(val, Exception):
+                raise val
+            return val
+        fake_mimo_instance.asr_sft.side_effect = asr_sft
+        fake_mimo_module.MimoAudio.return_value = fake_mimo_instance
+        return fake_mimo_module, fake_mimo_instance
+
+    def test_happy_path(self, tmp_path):
+        audio = tmp_path / "pod.flac"
+        audio.write_bytes(b"fake")
+        vad = [(0, 1000), (1500, 3000), (3500, 5000)]
+        mimo_mod, mimo_inst = self._mock_heavy_deps(vad, ["hello", "world", "!"])
+
+        with patch.object(mimo_asr, "require_cuda_and_vram"), \
+             patch.object(mimo_asr, "require_mimo_installed"), \
+             patch.object(mimo_asr, "run_fsmn_vad", return_value=vad), \
+             patch.object(mimo_asr, "extract_segment",
+                          side_effect=lambda *a, **k: str(tmp_path / "seg.wav")), \
+             patch.object(mimo_asr, "_load_mimo", return_value=mimo_inst), \
+             patch.object(mimo_asr, "assign_speakers_via_cam",
+                          side_effect=lambda segs, *a, **k: [
+                              {**s, "speaker": i % 2} for i, s in enumerate(segs)
+                          ]), \
+             patch.object(mimo_asr, "_cuda_cleanup"):
+            out = mimo_asr.transcribe_with_mimo(
+                str(audio), num_speakers=2, audio_tag="<chinese>",
+                weights_path=str(tmp_path),
+            )
+        assert len(out) == 3
+        assert out[0]["text"] == "hello"
+        assert out[1]["text"] == "world"
+        assert out[0]["start_ms"] == 0
+        assert out[0]["end_ms"] == 1000
+        assert out[0]["speaker"] == 0
+        assert out[1]["speaker"] == 1
+        # Partial file should NOT exist on success
+        partial = audio.parent / f"{audio.stem}_mimo_partial.json"
+        assert not partial.exists()
+
+    def test_failure_writes_partial_and_raises(self, tmp_path):
+        audio = tmp_path / "pod.flac"
+        audio.write_bytes(b"fake")
+        vad = [(0, 1000), (1500, 3000), (3500, 5000)]
+        # Segment 0 ok, segment 1 fails 3x
+        outputs = ["ok", RuntimeError("OOM"), RuntimeError("OOM"), RuntimeError("OOM")]
+        mimo_mod, mimo_inst = self._mock_heavy_deps(vad, outputs)
+
+        with patch.object(mimo_asr, "require_cuda_and_vram"), \
+             patch.object(mimo_asr, "require_mimo_installed"), \
+             patch.object(mimo_asr, "run_fsmn_vad", return_value=vad), \
+             patch.object(mimo_asr, "extract_segment",
+                          side_effect=lambda *a, **k: str(tmp_path / "seg.wav")), \
+             patch.object(mimo_asr, "_load_mimo", return_value=mimo_inst), \
+             patch.object(mimo_asr, "_cuda_cleanup"):
+            with pytest.raises(RuntimeError, match=r"segment 1"):
+                mimo_asr.transcribe_with_mimo(
+                    str(audio), num_speakers=2, audio_tag="<chinese>",
+                    weights_path=str(tmp_path),
+                    backoffs=[0.0, 0.0, 0.0],
+                )
+        partial = audio.parent / f"{audio.stem}_mimo_partial.json"
+        assert partial.exists()
+        state = json.loads(partial.read_text(encoding="utf-8"))
+        assert state["failed_at"]["idx"] == 1
+        assert [c["idx"] for c in state["completed"]] == [0]
+        assert state["completed"][0]["text"] == "ok"
+
+    def test_resume_skips_completed(self, tmp_path):
+        audio = tmp_path / "pod.flac"
+        audio.write_bytes(b"fake")
+        vad = [(0, 1000), (1500, 3000), (3500, 5000)]
+
+        # Pre-populate partial: segment 0 done, failed at 1
+        partial = audio.parent / f"{audio.stem}_mimo_partial.json"
+        audio_hash = mimo_asr.compute_audio_hash(str(audio))
+        mimo_asr.save_partial(
+            partial, audio_hash=audio_hash, audio_tag="<chinese>",
+            weights_path=str(tmp_path), vad_segments=[list(s) for s in vad],
+            completed=[{"idx": 0, "text": "ok", "start_ms": 0, "end_ms": 1000}],
+            failed_at={"idx": 1, "start_ms": 1500, "error": "OOM"},
+        )
+
+        # Resume: only segments 1 and 2 should be called
+        outputs = ["resumed", "done"]
+        mimo_mod, mimo_inst = self._mock_heavy_deps(vad, outputs)
+
+        with patch.object(mimo_asr, "require_cuda_and_vram"), \
+             patch.object(mimo_asr, "require_mimo_installed"), \
+             patch.object(mimo_asr, "run_fsmn_vad",
+                          side_effect=AssertionError("VAD must not run on resume")), \
+             patch.object(mimo_asr, "extract_segment",
+                          side_effect=lambda *a, **k: str(tmp_path / "seg.wav")), \
+             patch.object(mimo_asr, "_load_mimo", return_value=mimo_inst), \
+             patch.object(mimo_asr, "assign_speakers_via_cam",
+                          side_effect=lambda segs, *a, **k: [
+                              {**s, "speaker": 0} for s in segs
+                          ]), \
+             patch.object(mimo_asr, "_cuda_cleanup"):
+            out = mimo_asr.transcribe_with_mimo(
+                str(audio), num_speakers=2, audio_tag="<chinese>",
+                weights_path=str(tmp_path), resume=True,
+            )
+        assert len(out) == 3
+        assert out[0]["text"] == "ok"       # from partial
+        assert out[1]["text"] == "resumed"  # from resume
+        assert out[2]["text"] == "done"
+        assert mimo_inst.asr_sft.call_count == 2  # only 2 new calls
+        assert not partial.exists()  # cleaned on success
