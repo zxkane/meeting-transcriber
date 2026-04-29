@@ -53,3 +53,45 @@ class TestRequireCudaAndVram:
         fake_torch.cuda.get_device_properties.return_value = props
         with patch.dict(sys.modules, {"torch": fake_torch}):
             mimo_asr.require_cuda_and_vram(min_gb=20)  # must not raise
+
+
+class TestRequireMimoInstalled:
+    def test_missing_repo_raises(self, tmp_path):
+        weights = tmp_path / "hf"
+        weights.mkdir()
+        repo = tmp_path / "mimo"  # does NOT exist
+        with pytest.raises(RuntimeError, match=r"INSTALL_MIMO|setup_env\.sh"):
+            mimo_asr.require_mimo_installed(str(weights), str(repo))
+
+    def test_missing_weights_raises(self, tmp_path):
+        weights = tmp_path / "hf"
+        weights.mkdir()
+        repo = tmp_path / "mimo"
+        repo.mkdir()
+        (repo / "src").mkdir()  # looks like a clone
+
+        class LocalEntryNotFoundError(Exception):
+            pass
+
+        fake_hf = MagicMock()
+        fake_hf.snapshot_download.side_effect = LocalEntryNotFoundError("not cached")
+        fake_errs = MagicMock()
+        fake_errs.LocalEntryNotFoundError = LocalEntryNotFoundError
+        with patch.dict(sys.modules, {"huggingface_hub": fake_hf,
+                                      "huggingface_hub.errors": fake_errs}):
+            with pytest.raises(RuntimeError, match=r"MiMo weights not found"):
+                mimo_asr.require_mimo_installed(str(weights), str(repo))
+
+    def test_everything_present_passes(self, tmp_path):
+        weights = tmp_path / "hf"
+        weights.mkdir()
+        repo = tmp_path / "mimo"
+        repo.mkdir()
+        (repo / "src").mkdir()
+
+        fake_hf = MagicMock()
+        fake_hf.snapshot_download.return_value = str(tmp_path / "snap")
+        with patch.dict(sys.modules, {"huggingface_hub": fake_hf}):
+            mimo_asr.require_mimo_installed(str(weights), str(repo))  # no raise
+        # Called once per repo id
+        assert fake_hf.snapshot_download.call_count == 2

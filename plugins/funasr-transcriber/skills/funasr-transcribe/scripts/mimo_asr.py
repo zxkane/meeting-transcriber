@@ -50,8 +50,39 @@ def require_cuda_and_vram(min_gb: int = 20) -> None:
 
 
 def require_mimo_installed(weights_path: str, repo_path: str) -> None:
-    """Pre-flight: require MiMo repo cloned and weights downloaded. Not implemented yet."""
-    raise NotImplementedError
+    """Pre-flight: require the MiMo GitHub repo cloned and HF weights downloaded.
+
+    Raises:
+        RuntimeError: with a user-facing message pointing to the install command.
+    """
+    repo = Path(repo_path)
+    if not (repo.is_dir() and (repo / "src").is_dir()):
+        raise RuntimeError(
+            f"--lang mimo requires MiMo to be installed, but the MiMo repo "
+            f"was not found at {repo_path}. "
+            f"Run: INSTALL_MIMO=1 bash $SCRIPTS/setup_env.sh"
+        )
+
+    import huggingface_hub as _hf
+    # Access .errors via sys.modules so patch.dict mocks stay in effect
+    _hf_errors = sys.modules.get("huggingface_hub.errors", None)
+    if _hf_errors is None:
+        from huggingface_hub import errors as _hf_errors  # type: ignore[no-redef]
+    LocalEntryNotFoundError = _hf_errors.LocalEntryNotFoundError
+    for repo_id in ("XiaomiMiMo/MiMo-V2.5-ASR",
+                    "XiaomiMiMo/MiMo-Audio-Tokenizer"):
+        try:
+            _hf.snapshot_download(repo_id, cache_dir=weights_path,
+                                  local_files_only=True)
+        except Exception as e:  # noqa: BLE001
+            if isinstance(e, LocalEntryNotFoundError):
+                raise RuntimeError(
+                    f"MiMo weights not found at {weights_path} "
+                    f"(missing: {repo_id}). "
+                    f"Run: INSTALL_MIMO=1 MIMO_WEIGHTS_PATH={weights_path} "
+                    f"bash $SCRIPTS/setup_env.sh"
+                ) from e
+            raise
 
 
 def transcribe_with_mimo(audio_path: str,
