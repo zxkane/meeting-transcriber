@@ -44,18 +44,39 @@ else
     echo "  WARNING: $MIMO_REPO_DIR/requirements.txt missing — skipping."
 fi
 
-# 3. Install flash-attn (requires nvcc; compile can take 10–30 min)
+# 3. Install flash-attn. Prefer the pre-built wheel matching the installed
+# torch + python + cxx11abi. This works on CUDA-driver-only hosts (most AWS
+# GPU instances) and avoids a 10–30 min nvcc compile. Fall back to source
+# build only when no matching wheel is published.
 if python3 -c "import flash_attn" 2>/dev/null; then
     echo "[3/4] flash-attn already installed — skipping."
 else
-    if ! command -v nvcc &>/dev/null; then
-        echo "ERROR: nvcc not found."
-        echo "  flash-attn requires the CUDA toolkit (not just the driver)."
-        echo "  Install: https://developer.nvidia.com/cuda-toolkit"
-        exit 1
+    FA_VER="2.7.4.post1"
+    echo "[3/4] Detecting pre-built flash-attn wheel for installed torch..."
+    read -r TORCH_MINOR ABI <<EOF_DETECT
+$(python3 -c "import torch; v=torch.__version__.split('+')[0].rsplit('.',1)[0]; print(v, 'TRUE' if torch.compiled_with_cxx11_abi() else 'FALSE')")
+EOF_DETECT
+    PY_MINOR=$(python3 -c "import sys; print(f'cp{sys.version_info[0]}{sys.version_info[1]}')")
+    WHEEL_NAME="flash_attn-${FA_VER}+cu12torch${TORCH_MINOR}cxx11abi${ABI}-${PY_MINOR}-${PY_MINOR}-linux_x86_64.whl"
+    WHEEL_URL="https://github.com/Dao-AILab/flash-attention/releases/download/v${FA_VER}/${WHEEL_NAME}"
+    echo "  torch=${TORCH_MINOR} abi=${ABI} py=${PY_MINOR}"
+    echo "  wheel: ${WHEEL_NAME}"
+
+    if pip install --no-deps "${WHEEL_URL}" 2>&1 | tail -5; then
+        echo "  Installed from pre-built wheel."
+    else
+        echo "  Pre-built wheel install failed — falling back to source build."
+        if ! command -v nvcc &>/dev/null; then
+            echo "ERROR: no matching pre-built wheel and nvcc not found."
+            echo "  Either (a) ensure your torch/python combo matches a wheel at"
+            echo "  https://github.com/Dao-AILab/flash-attention/releases/tag/v${FA_VER}"
+            echo "  or (b) install the CUDA toolkit:"
+            echo "  https://developer.nvidia.com/cuda-toolkit"
+            exit 1
+        fi
+        echo "  Building flash-attn==${FA_VER} from source (10–30 min)..."
+        pip install "flash-attn==${FA_VER}" --no-build-isolation
     fi
-    echo "[3/4] Installing flash-attn==2.7.4.post1 (this can take 10–30 min)..."
-    pip install flash-attn==2.7.4.post1 --no-build-isolation
 fi
 
 # 4. Download weights (idempotent — huggingface-cli skips cached files)

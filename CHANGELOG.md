@@ -9,7 +9,11 @@
 - **`scripts/setup_mimo.sh`:** opt-in installer (`INSTALL_MIMO=1 bash
   setup_env.sh`) that clones the MiMo repo, installs `flash-attn`, and
   downloads ~20 GB of weights to `$MIMO_WEIGHTS_PATH` (defaults to
-  `$HF_HOME` → `~/.cache/huggingface`).
+  `$HF_HOME` → `~/.cache/huggingface`). Prefers pre-built `flash-attn`
+  wheels matching the installed torch + Python + ABI so the install
+  completes on CUDA-driver-only hosts (most AWS GPU instances) without
+  requiring the CUDA toolkit (`nvcc`). Falls back to a source build only
+  when no matching wheel is published.
 - **`--mimo-audio-tag`, `--mimo-batch`, `--mimo-weights-path`,
   `--resume-mimo`:** CLI flags for the new preset. `--resume-mimo` picks up
   from a mid-run failure using `*_mimo_partial.json` with audio-hash
