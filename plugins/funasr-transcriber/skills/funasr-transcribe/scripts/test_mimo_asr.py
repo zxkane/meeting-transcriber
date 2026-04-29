@@ -93,3 +93,52 @@ class TestRequireMimoInstalled:
             mimo_asr.require_mimo_installed(str(weights), str(repo))  # no raise
         # Called once per repo id
         assert fake_hf.snapshot_download.call_count == 2
+
+
+class TestPartialState:
+    def test_audio_hash_is_stable_for_same_bytes(self, tmp_path):
+        p = tmp_path / "a.flac"
+        p.write_bytes(b"hello" * 1000)
+        h1 = mimo_asr.compute_audio_hash(str(p))
+        h2 = mimo_asr.compute_audio_hash(str(p))
+        assert h1 == h2
+        assert h1.startswith("sha256:")
+        assert len(h1) == 7 + 64
+
+    def test_audio_hash_differs_for_different_bytes(self, tmp_path):
+        p1 = tmp_path / "a.flac"
+        p2 = tmp_path / "b.flac"
+        p1.write_bytes(b"hello")
+        p2.write_bytes(b"world")
+        assert mimo_asr.compute_audio_hash(str(p1)) != mimo_asr.compute_audio_hash(str(p2))
+
+    def test_save_load_partial_roundtrip(self, tmp_path):
+        partial = tmp_path / "pod_mimo_partial.json"
+        mimo_asr.save_partial(
+            partial,
+            audio_hash="sha256:abc",
+            audio_tag="<chinese>",
+            weights_path="/mnt/hf",
+            vad_segments=[[0, 1000], [2000, 3000]],
+            completed=[{"idx": 0, "text": "hi", "start_ms": 0, "end_ms": 1000}],
+            failed_at={"idx": 1, "start_ms": 2000, "error": "CUDA OOM"},
+        )
+        state = mimo_asr.load_partial(partial, audio_hash="sha256:abc",
+                                      audio_tag="<chinese>")
+        assert state["vad_segments"] == [[0, 1000], [2000, 3000]]
+        assert state["completed"][0]["text"] == "hi"
+        assert state["failed_at"]["idx"] == 1
+
+    def test_load_partial_hash_mismatch_raises(self, tmp_path):
+        partial = tmp_path / "pod_mimo_partial.json"
+        mimo_asr.save_partial(partial, "sha256:OLD", "<chinese>", "/mnt/hf",
+                              [[0, 100]], [], {"idx": 0, "error": "x"})
+        with pytest.raises(RuntimeError, match=r"audio file changed"):
+            mimo_asr.load_partial(partial, "sha256:NEW", "<chinese>")
+
+    def test_load_partial_tag_mismatch_raises(self, tmp_path):
+        partial = tmp_path / "pod_mimo_partial.json"
+        mimo_asr.save_partial(partial, "sha256:X", "<chinese>", "/mnt/hf",
+                              [[0, 100]], [], {"idx": 0, "error": "x"})
+        with pytest.raises(RuntimeError, match=r"audio_tag"):
+            mimo_asr.load_partial(partial, "sha256:X", "<english>")

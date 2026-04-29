@@ -94,13 +94,50 @@ def transcribe_with_mimo(audio_path: str,
     raise NotImplementedError
 
 
+def compute_audio_hash(path: str, _chunk: int = 1 << 20) -> str:
+    """SHA256 of the file at path, streamed, prefixed with 'sha256:'."""
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            buf = f.read(_chunk)
+            if not buf:
+                break
+            h.update(buf)
+    return f"sha256:{h.hexdigest()}"
+
+
 def save_partial(partial_path: Path, audio_hash: str, audio_tag: str,
                  weights_path: str, vad_segments: list, completed: list,
                  failed_at: dict) -> None:
-    """Persist in-progress MiMo inference state. Not implemented yet."""
-    raise NotImplementedError
+    """Persist MiMo inference state so --resume-mimo can continue."""
+    payload = {
+        "audio_hash": audio_hash,
+        "audio_tag": audio_tag,
+        "mimo_weights_path": weights_path,
+        "vad_segments": vad_segments,
+        "completed": completed,
+        "failed_at": failed_at,
+    }
+    tmp = Path(str(partial_path) + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
+                   encoding="utf-8")
+    tmp.replace(partial_path)
 
 
 def load_partial(partial_path: Path, audio_hash: str, audio_tag: str) -> dict:
-    """Load resume state; raise on hash/tag mismatch. Not implemented yet."""
-    raise NotImplementedError
+    """Load resume state, verifying audio_hash and audio_tag match the current run."""
+    state = json.loads(Path(partial_path).read_text(encoding="utf-8"))
+    if state.get("audio_hash") != audio_hash:
+        raise RuntimeError(
+            f"audio file changed since partial was saved "
+            f"({state.get('audio_hash')} != {audio_hash}). "
+            f"Delete {partial_path} to restart."
+        )
+    if state.get("audio_tag") != audio_tag:
+        raise RuntimeError(
+            f"audio_tag changed since partial was saved "
+            f"({state.get('audio_tag')} != {audio_tag}). "
+            f"Use the same --mimo-audio-tag as the original run, or "
+            f"delete {partial_path} to restart."
+        )
+    return state
