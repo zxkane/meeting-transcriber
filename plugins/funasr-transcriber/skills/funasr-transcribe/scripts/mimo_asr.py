@@ -44,7 +44,9 @@ def transcribe_with_mimo(audio_path: str,
                          resume: bool = False,
                          device: str = "cuda:0",
                          spk_model_id: str = "iic/speech_campplus_sv_zh-cn_16k-common",
-                         vad_model_id: str = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch") -> list:
+                         vad_model_id: str = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch",
+                         repo_path: Optional[str] = None,
+                         backoffs: list = (0.5, 2.0, 5.0)) -> list:
     """Phase 1 MiMo path: VAD -> MiMo ASR -> CAM++ speaker labels. Not implemented yet."""
     raise NotImplementedError
 
