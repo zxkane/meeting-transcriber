@@ -220,6 +220,56 @@ class TestVadAndExtract:
         assert str(src) in cmd
 
 
+class TestExtractSpeakerEmbedding:
+    """CAM++ returns CUDA tensors on GPU runs; converter must CPU-ify first."""
+
+    def test_cuda_tensor_embedding_is_moved_to_cpu(self):
+        import numpy as np
+
+        # Simulate a torch.Tensor-like object: has `.detach()` that chains to
+        # `.cpu()` and `.numpy()`. np.asarray cannot directly consume a CUDA
+        # tensor, so without the detach().cpu() fix this path raises.
+        class FakeCudaTensor:
+            def __init__(self, values):
+                self._values = values
+                self.cpu_called = False
+
+            def detach(self):
+                return self
+
+            def cpu(self):
+                self.cpu_called = True
+                return self
+
+            def numpy(self):
+                if not self.cpu_called:
+                    raise TypeError("can't convert cuda:0 device type tensor to numpy")
+                return np.array(self._values, dtype=np.float32)
+
+        fake_tensor = FakeCudaTensor([0.5, 0.25, 0.75])
+        spk_model = MagicMock()
+        spk_model.generate.return_value = [{"spk_embedding": fake_tensor}]
+
+        audio = np.zeros(32000, dtype=np.float32)  # 2s of 16kHz
+        emb = mimo_asr._extract_speaker_embedding(0, 1000, spk_model, audio, 16000)
+        assert emb is not None
+        assert emb.dtype == np.float32
+        assert emb.shape == (3,)
+        assert fake_tensor.cpu_called  # fix path exercised
+
+    def test_numpy_embedding_still_works(self):
+        """Pre-GPU code path: the speaker model may return a plain numpy array."""
+        import numpy as np
+        spk_model = MagicMock()
+        spk_model.generate.return_value = [{
+            "spk_embedding": np.array([0.1, 0.2, 0.3], dtype=np.float64)
+        }]
+        audio = np.zeros(32000, dtype=np.float32)
+        emb = mimo_asr._extract_speaker_embedding(0, 1000, spk_model, audio, 16000)
+        assert emb is not None
+        assert emb.dtype == np.float32  # coerced
+
+
 class TestAssignSpeakersViaCam:
     def test_assigns_speaker_ids_from_embeddings(self, tmp_path):
         # 4 segments; embeddings designed so KMeans(k=2) splits {0,2} vs {1,3}

@@ -294,7 +294,14 @@ def transcribe_with_mimo(audio_path: str,
 
 def _extract_speaker_embedding(start_ms: int, end_ms: int, spk_model,
                                audio_data, sample_rate: int):
-    """Extract a CAM++ embedding for one audio segment. Returns np.ndarray or None."""
+    """Extract a CAM++ embedding for one audio segment. Returns np.ndarray or None.
+
+    CAM++ may return the embedding as a CUDA `torch.Tensor` when running on
+    GPU (observed on L40S with MiMo keeping torch in CUDA mode). `np.asarray`
+    cannot view CUDA memory directly and raises
+    'can\\'t convert cuda:0 device type tensor to numpy'. Move to CPU before
+    converting to a numpy array.
+    """
     import numpy as np
     start = int(start_ms * sample_rate / 1000)
     end = int(end_ms * sample_rate / 1000)
@@ -306,6 +313,8 @@ def _extract_speaker_embedding(start_ms: int, end_ms: int, spk_model,
         if result and isinstance(result, list) and len(result) > 0:
             emb = result[0].get("spk_embedding")
             if emb is not None:
+                if hasattr(emb, "detach"):  # torch.Tensor
+                    emb = emb.detach().cpu().numpy()
                 return np.asarray(emb, dtype=np.float32).flatten()
     except Exception as e:
         print(f"    WARNING: embedding extraction failed at {start_ms}ms: {e}")
