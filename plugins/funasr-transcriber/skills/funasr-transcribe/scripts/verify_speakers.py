@@ -101,7 +101,8 @@ def compute_speaker_stats(transcript: list, speaker_map: dict,
 # ──────────────────────────────────────────────
 
 def verify_podcast(early_text: str, speaker_map: dict,
-                   speaker_context: dict, model_id: str, region: str) -> dict:
+                   speaker_context: dict, model_id: str, region: str,
+                   provider: Optional[str] = None) -> dict:
     """Binary host/guest swap detection for 2-speaker podcasts."""
     names = list(speaker_map.values())
     speaker_list = "\n".join(f"- {n}" for n in names)
@@ -123,7 +124,8 @@ def verify_podcast(early_text: str, speaker_map: dict,
         "EVIDENCE: one sentence explaining your reasoning"
     )
 
-    result = call_llm(system_prompt, early_text, model_id, region)
+    result = call_llm(system_prompt, early_text, model_id, region,
+                      provider=provider)
     verdict, confidence, evidence = "UNKNOWN", "LOW", ""
     for line in result.strip().splitlines():
         line = line.strip()
@@ -142,7 +144,8 @@ def verify_podcast(early_text: str, speaker_map: dict,
 # ──────────────────────────────────────────────
 
 def verify_meeting(early_text: str, speaker_map: dict,
-                   speaker_context: dict, model_id: str, region: str) -> dict:
+                   speaker_context: dict, model_id: str, region: str,
+                   provider: Optional[str] = None) -> dict:
     """Full reassignment analysis for multi-speaker meetings."""
     names = list(speaker_map.values())
     speaker_list = "\n".join(f"- {n}" for n in names)
@@ -174,7 +177,8 @@ def verify_meeting(early_text: str, speaker_map: dict,
         "If labels are already correct, mapping should echo the current assignments."
     )
 
-    result = call_llm(system_prompt, early_text, model_id, region)
+    result = call_llm(system_prompt, early_text, model_id, region,
+                      provider=provider)
 
     # Extract JSON from response
     json_match = re.search(r"\{[\s\S]*\}", result)
@@ -266,7 +270,12 @@ def main():
     p.add_argument("--minutes", type=int, default=5,
                    help="Minutes of transcript to analyze (default: 5)")
     p.add_argument("--model", default="us.anthropic.claude-sonnet-4-6",
-                   help="LLM model ID (auto-detects Bedrock/Anthropic/OpenAI)")
+                   help="LLM model ID (auto-detects Bedrock/Anthropic/OpenAI; "
+                        "pass --provider to override)")
+    p.add_argument("--provider", choices=("bedrock", "anthropic", "openai"),
+                   default=None,
+                   help="Explicit LLM provider (bypasses auto-detection). "
+                        "Recommended when --model contains ambiguous prefixes.")
     p.add_argument("--bedrock-region", default="us-west-2",
                    help="AWS region for Bedrock")
     p.add_argument("--fix", action="store_true",
@@ -319,13 +328,14 @@ def main():
     print()
 
     # Run verification
-    provider = detect_llm_provider(args.model)
+    provider = args.provider or detect_llm_provider(args.model)
     print(f"Model: {args.model} (provider: {provider})")
 
     if num_speakers == 2:
         print("Mode: podcast (2-speaker swap detection)\n")
         result = verify_podcast(early_text, speaker_map, speaker_context,
-                                args.model, args.bedrock_region)
+                                args.model, args.bedrock_region,
+                                provider=provider)
         verdict = result["verdict"]
         confidence = result["confidence"]
         evidence = result["evidence"]
@@ -352,7 +362,8 @@ def main():
     else:
         print(f"Mode: meeting ({num_speakers}-speaker reassignment)\n")
         result = verify_meeting(early_text, speaker_map, speaker_context,
-                                args.model, args.bedrock_region)
+                                args.model, args.bedrock_region,
+                                provider=provider)
 
         correct = result.get("correct", None)
         confidence = result.get("confidence", "UNKNOWN")

@@ -361,32 +361,106 @@ def merge_consecutive(transcript: list, gap_ms: int = 2000,
     return merged
 
 
+# Name class shared between inline role patterns and title-line parsing.
+# CJK chars, ASCII letters/digits, a few name punctuations (·-·). Stops at
+# anything else — whitespace, sentence terminators, parentheses, brackets,
+# quotes, commas. Keeps us safe from "李雷.本期..." or "Alice (senior
+# analyst)" being captured as names.
+_NAME_RE = r"[\w一-鿿·\-]{1,30}"
+
+# Title lines: role label alone on its own line (optionally wrapped in
+# decoration like emoji or whitespace — NOT with inline name/colon, which
+# belongs to the inline role pattern). Decoration class excludes word
+# chars and the ASCII/fullwidth colons so "主播：关羽" isn't mistaken for
+# a title heading. Announces a block of following `Name: description`
+# lines which we collect as guests/hosts.
+# `_DECO` already includes whitespace (everything that isn't word / colon /
+# newline), so a single `_DECO*` on each side captures any mix of emoji,
+# punctuation, and spaces.
+_DECO = r"[^\w：:\n]"
+_TITLE_ROLE_HOST = re.compile(
+    r"^" + _DECO + r"*"
+    r"(?:主播|主持[人员]?|Hosts?)"
+    + _DECO + r"*$",
+    re.IGNORECASE)
+_TITLE_ROLE_GUEST = re.compile(
+    r"^" + _DECO + r"*"
+    r"(?:本期)?" + _DECO + r"*(?:嘉宾|Guests?)"
+    + _DECO + r"*$",
+    re.IGNORECASE)
+# A title-block entry line: `Name: description` (ASCII or fullwidth colon).
+_TITLE_ENTRY = re.compile(
+    r"^\s*(" + _NAME_RE + r")\s*[：:]\s*\S.*$")
+
+
+def _parse_title_blocks(reference_text: str) -> tuple[list, list]:
+    """Scan reference for `Role\\nName: bio\\n...` blocks (小宇宙 / Apple
+    Podcasts style) and return (hosts, guests) lists."""
+    hosts, guests = [], []
+    lines = reference_text.split("\n")
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        bucket = None
+        if _TITLE_ROLE_HOST.match(line):
+            bucket = hosts
+        elif _TITLE_ROLE_GUEST.match(line):
+            bucket = guests
+        if bucket is None:
+            i += 1
+            continue
+        # Collect following entry lines until a non-entry / blank / new heading.
+        i += 1
+        while i < len(lines):
+            entry = lines[i]
+            if not entry.strip():  # blank line terminates block
+                break
+            m = _TITLE_ENTRY.match(entry)
+            if not m:
+                break
+            name = m.group(1).strip()
+            if name and name not in bucket:
+                bucket.append(name)
+            i += 1
+    return hosts, guests
+
+
 def extract_speaker_names_from_reference(reference_text: Optional[str]) -> list:
     """Best-effort extraction of speaker names from show notes / reference text.
 
-    Recognizes common Chinese/English podcast role labels like
-    "主播：李雷", "嘉宾: Alice", "Host: Bob", "Guest — Carol". Host is
-    listed first so single-speaker recordings resolve to the host name.
-    Returns an empty list if no labels match.
+    Recognizes two layouts:
+
+    1. Inline role labels: "主播：李雷", "嘉宾: Alice", "Host: Bob",
+       "Guest — Carol".
+    2. Title-line blocks: a role word on its own line (with optional
+       decorative punctuation/emoji) followed by `Name: description` lines,
+       as used by 小宇宙 / Apple Podcasts shownotes exports.
+
+    Host entries are listed first so single-speaker recordings resolve to
+    the host name. Returns an empty list if nothing matches.
     """
     if not reference_text:
         return []
 
     hosts, guests = [], []
-    # Name class: CJK chars, ASCII letters/digits, and a few name punctuations
-    # (·-·). Stops at anything else — whitespace, sentence terminators,
-    # parentheses, brackets, quotes, commas. Keeps us safe from
-    # "李雷.本期..." or "Alice (senior analyst)" being captured as names.
-    name_re = r"[\w一-鿿·\-]{1,30}"
     role_patterns = [
-        (r"(?:主播|主持[人员]?|Host)\s*[:：\-—–]\s*(" + name_re + ")", hosts),
-        (r"(?:嘉宾|Guest)\s*[:：\-—–]\s*(" + name_re + ")", guests),
+        (r"(?:主播|主持[人员]?|Host)\s*[:：\-—–]\s*(" + _NAME_RE + ")", hosts),
+        (r"(?:嘉宾|Guest)\s*[:：\-—–]\s*(" + _NAME_RE + ")", guests),
     ]
     for pat, bucket in role_patterns:
         for m in re.finditer(pat, reference_text, re.IGNORECASE):
             name = m.group(1).strip()
             if name and name not in bucket:
                 bucket.append(name)
+
+    # Fall back to title-block layout for anything not found inline.
+    title_hosts, title_guests = _parse_title_blocks(reference_text)
+    for n in title_hosts:
+        if n not in hosts:
+            hosts.append(n)
+    for n in title_guests:
+        if n not in guests:
+            guests.append(n)
 
     # Dedup across buckets so "主播：Alice\n嘉宾：Alice" doesn't produce
     # duplicate speaker names downstream.
@@ -414,13 +488,11 @@ def detect_alias_in_speakers(speaker_names: list,
         return []
 
     # Match "real_name（alias）" or "real_name(alias)" after Host/Guest/主播/嘉宾 labels.
-    # Uses the same name_re as extract_speaker_names_from_reference for real name;
-    # alias class is looser (allow spaces) since aliases can be multi-word.
-    name_re = r"[\w一-鿿·\-]{1,30}"
+    # Alias class is looser than _NAME_RE (allow spaces) since aliases can be multi-word.
     alias_re = r"[\w一-鿿·\- ]{1,40}"
     pair_patterns = [
         r"(?:主播|主持[人员]?|Host|嘉宾|Guest)\s*[:：\-—–]\s*("
-        + name_re + r")\s*[（(]\s*(" + alias_re + r")\s*[)）]",
+        + _NAME_RE + r")\s*[（(]\s*(" + alias_re + r")\s*[)）]",
     ]
     pairs = []
     for pat in pair_patterns:
@@ -617,13 +689,58 @@ def rescore_montage_speakers(transcript: list, montage_end: int,
     return transcript
 
 
+# Intro-phrase templates. Doubled braces escape Python .format(); single
+# {name} is the placeholder substituted with each name variant.
+_INTRO_PATTERN_TEMPLATES = (
+    r"我是[^。？！\n]{{0,15}}{name}",
+    r"我叫[^。？！\n]{{0,10}}{name}",
+    r"I'?\s*m\s+{name}",
+    r"I\s+am\s+{name}",
+    r"my\s+name\s+is\s+{name}",
+    r"this\s+is\s+{name}",
+    r"大家好[^。？！\n]{{0,20}}{name}",
+)
+
+
+def _scan_self_intros(early_segments: list, speaker_map: dict,
+                      all_variants: list) -> tuple[list, list]:
+    """Scan segments for self-introductions against the current label map.
+    Returns (mismatches, confirmations)."""
+    mismatches: list = []
+    confirmations: list = []
+    for seg in early_segments:
+        current_label = speaker_map.get(seg["speaker"], "")
+        text = seg["text"]
+        for variant, full_name in all_variants:
+            for pat_template in _INTRO_PATTERN_TEMPLATES:
+                pat = pat_template.format(name=re.escape(variant))
+                if re.search(pat, text, re.IGNORECASE):
+                    entry = {
+                        "speaker_id": seg["speaker"],
+                        "current_label": current_label,
+                        "actual_name": full_name,
+                        "evidence": text[:100],
+                        "time_ms": seg["start_ms"],
+                    }
+                    if full_name == current_label:
+                        confirmations.append(entry)
+                    else:
+                        mismatches.append(entry)
+    return mismatches, confirmations
+
+
 def verify_speaker_assignment(transcript: list, speaker_map: dict,
                               speaker_names: Optional[list] = None) -> dict:
     """Auto-verify speaker assignment by detecting self-introductions.
 
-    Scans the first 5 minutes of transcript. If a speaker says their own name
-    (e.g., "我是张飞" / "I'm Alice") but is currently labeled as someone else,
-    swap all speaker assignments globally.
+    Scans the first 5 minutes of transcript. When a speaker says their own
+    name (e.g., "我是张飞" / "I'm Alice") but carries a different label,
+    pairs up the current ID with whichever ID holds the correct name and
+    swaps them. The scan then re-runs against the updated map to catch
+    additional rotations — a single pairwise swap cannot untangle 3+
+    speakers arranged in a cycle (id 0→C, 1→A, 2→B), so we iterate until
+    no further mismatches remain, capped at `len(speaker_map) - 1` rounds
+    (the theoretical upper bound for resolving any N-element cycle).
 
     Returns the (possibly corrected) speaker_map.
     """
@@ -647,42 +764,44 @@ def verify_speaker_assignment(transcript: list, speaker_map: dict,
     for name in speaker_names:
         all_variants.extend(_name_variants(name))
 
-    # Patterns: allow optional filler between intro phrase and name
-    # "我是冰洁", "我是屠龙之术的主播庄明浩", "I'm Alice", etc.
-    # Double braces {{}} escape Python .format(); single {name} is the placeholder.
-    intro_patterns = [
-        r"我是[^。？！\n]{{0,15}}{name}",
-        r"我叫[^。？！\n]{{0,10}}{name}",
-        r"I'?\s*m\s+{name}",
-        r"I\s+am\s+{name}",
-        r"my\s+name\s+is\s+{name}",
-        r"this\s+is\s+{name}",
-        r"大家好[^。？！\n]{{0,20}}{name}",
-    ]
+    # Cap iterations at N: any N-element cycle resolves in ≤ N-1 swaps,
+    # plus one final pass to verify convergence (and `break`).
+    max_iterations = max(2, len(speaker_map))
+    swap_count = 0
+    converged = False
+    for _ in range(max_iterations):
+        mismatches, _ = _scan_self_intros(
+            early_segments, speaker_map, all_variants)
+        if not mismatches:
+            converged = True
+            break
+        m = mismatches[0]
+        print(f"  Speaker verification: at [{format_time_ms(m['time_ms'])}], "
+              f"speaker labeled '{m['current_label']}' said a self-introduction "
+              f"matching '{m['actual_name']}'. Swapping labels.")
+        id_a = m["speaker_id"]  # Currently mislabeled
+        id_b = None
+        for spk_id, label in speaker_map.items():
+            if label == m["actual_name"]:
+                id_b = spk_id
+                break
+        if id_b is not None and id_a != id_b:
+            speaker_map[id_a], speaker_map[id_b] = (
+                speaker_map[id_b], speaker_map[id_a])
+            print(f"  Swapped: SPEAKER_{id_a} ↔ SPEAKER_{id_b}")
+        else:
+            speaker_map[id_a] = m["actual_name"]
+            print(f"  Relabeled: SPEAKER_{id_a} → {m['actual_name']}")
+        swap_count += 1
 
-    # Check each early segment for self-introductions
-    mismatches = []
-    confirmations = []
-    for seg in early_segments:
-        current_label = speaker_map.get(seg["speaker"], "")
-        text = seg["text"]
-        for variant, full_name in all_variants:
-            for pat_template in intro_patterns:
-                pat = pat_template.format(name=re.escape(variant))
-                if re.search(pat, text, re.IGNORECASE):
-                    entry = {
-                        "speaker_id": seg["speaker"],
-                        "current_label": current_label,
-                        "actual_name": full_name,
-                        "evidence": text[:100],
-                        "time_ms": seg["start_ms"],
-                    }
-                    if full_name == current_label:
-                        confirmations.append(entry)
-                    else:
-                        mismatches.append(entry)
+    if not converged and swap_count > 0:
+        print(f"  WARNING: speaker verification hit iteration cap "
+              f"({max_iterations}) with unresolved mismatches. "
+              f"Contradictory self-intros — manual review recommended.")
 
-    if not mismatches:
+    if swap_count == 0:
+        _, confirmations = _scan_self_intros(
+            early_segments, speaker_map, all_variants)
         if confirmations:
             c = confirmations[0]
             print(f"  Speaker verification: CONFIRMED at [{format_time_ms(c['time_ms'])}], "
@@ -690,29 +809,6 @@ def verify_speaker_assignment(transcript: list, speaker_map: dict,
         else:
             print("  WARNING: Could not auto-verify speaker assignment. "
                   "Manual review recommended.")
-        return speaker_map
-
-    # If we found a mismatch, swap the two speaker IDs globally
-    m = mismatches[0]
-    print(f"  Speaker verification: at [{format_time_ms(m['time_ms'])}], "
-          f"speaker labeled '{m['current_label']}' said a self-introduction "
-          f"matching '{m['actual_name']}'. Swapping labels.")
-
-    # Find the two speaker IDs to swap
-    id_a = m["speaker_id"]  # Currently mislabeled
-    id_b = None
-    for spk_id, label in speaker_map.items():
-        if label == m["actual_name"]:
-            id_b = spk_id
-            break
-
-    if id_b is not None and id_a != id_b:
-        speaker_map[id_a], speaker_map[id_b] = speaker_map[id_b], speaker_map[id_a]
-        print(f"  Swapped: SPEAKER_{id_a} ↔ SPEAKER_{id_b}")
-    else:
-        speaker_map[id_a] = m["actual_name"]
-        print(f"  Relabeled: SPEAKER_{id_a} → {m['actual_name']}")
-
     return speaker_map
 
 
@@ -831,7 +927,8 @@ def build_system_prompt(speaker_context: Optional[dict] = None,
 
 def _verify_speaker_roles_via_llm(first_chunk_text: str, speaker_map: dict,
                                    speaker_context: dict, model_id: str,
-                                   region: str) -> dict:
+                                   region: str,
+                                   provider: Optional[str] = None) -> dict:
     """Verify and correct speaker label assignments using LLM content analysis.
 
     For 2 speakers: binary CORRECT/SWAP detection.
@@ -844,14 +941,17 @@ def _verify_speaker_roles_via_llm(first_chunk_text: str, speaker_map: dict,
 
     if len(speaker_map) == 2:
         return _verify_two_speakers(
-            first_chunk_text, speaker_map, speaker_list, context_lines, model_id, region)
+            first_chunk_text, speaker_map, speaker_list, context_lines,
+            model_id, region, provider)
     return _verify_multi_speakers(
-        first_chunk_text, speaker_map, speaker_list, context_lines, model_id, region)
+        first_chunk_text, speaker_map, speaker_list, context_lines,
+        model_id, region, provider)
 
 
 def _verify_two_speakers(first_chunk_text: str, speaker_map: dict,
                           speaker_list: str, context_lines: str,
-                          model_id: str, region: str) -> dict:
+                          model_id: str, region: str,
+                          provider: Optional[str] = None) -> dict:
     verify_prompt = (
         "You are a speaker identification expert. Analyze the following transcript "
         "excerpt and determine whether the speaker labels are correctly assigned.\n\n"
@@ -868,7 +968,8 @@ def _verify_two_speakers(first_chunk_text: str, speaker_map: dict,
         "No explanation, just the single word."
     )
     try:
-        result = call_llm(verify_prompt, first_chunk_text, model_id, region)
+        result = call_llm(verify_prompt, first_chunk_text, model_id, region,
+                          provider=provider)
     except ImportError:
         raise
     except Exception as e:
@@ -893,7 +994,8 @@ def _verify_two_speakers(first_chunk_text: str, speaker_map: dict,
 
 def _verify_multi_speakers(first_chunk_text: str, speaker_map: dict,
                             speaker_list: str, context_lines: str,
-                            model_id: str, region: str) -> dict:
+                            model_id: str, region: str,
+                            provider: Optional[str] = None) -> dict:
     verify_prompt = (
         "You are a speaker identification expert for multi-speaker recordings. "
         "Analyze the transcript excerpt and determine whether each speaker label "
@@ -912,7 +1014,8 @@ def _verify_multi_speakers(first_chunk_text: str, speaker_map: dict,
         "If labels are already correct, mapping should echo the current assignments."
     )
     try:
-        result = call_llm(verify_prompt, first_chunk_text, model_id, region)
+        result = call_llm(verify_prompt, first_chunk_text, model_id, region,
+                          provider=provider)
     except ImportError:
         raise
     except Exception as e:
@@ -971,15 +1074,18 @@ def _verify_multi_speakers(first_chunk_text: str, speaker_map: dict,
 def run_llm_cleanup(merged: list, speaker_map: dict, model_id: str, region: str,
                     speaker_context: Optional[dict] = None, cache_dir: Optional[Path] = None,
                     reference_text: Optional[str] = None, speaker_names: Optional[list] = None,
-                    speaker_genders: Optional[dict] = None) -> list:
+                    speaker_genders: Optional[dict] = None,
+                    provider: Optional[str] = None) -> list:
     """Chunk merged transcript and clean each via LLM. Supports resume via cache_dir."""
     chunks = chunk_by_duration(merged)
+    effective_provider = provider or detect_llm_provider(model_id)
 
     # Pre-cleanup: verify speaker roles using LLM analysis of first chunk
     if speaker_context and len(speaker_map) >= 2 and chunks:
         first_chunk_text = format_chunk(chunks[0], speaker_map)
         speaker_map = _verify_speaker_roles_via_llm(
-            first_chunk_text, speaker_map, speaker_context, model_id, region)
+            first_chunk_text, speaker_map, speaker_context, model_id, region,
+            provider=effective_provider)
 
     system_prompt = build_system_prompt(speaker_context, reference_text,
                                         speaker_names, speaker_genders)
@@ -988,8 +1094,8 @@ def run_llm_cleanup(merged: list, speaker_map: dict, model_id: str, region: str,
     if cache_dir:
         cache_dir.mkdir(exist_ok=True)
 
-    provider = detect_llm_provider(model_id)
-    print(f"  LLM cleanup: {len(chunks)} chunks, model: {model_id} (provider: {provider})")
+    print(f"  LLM cleanup: {len(chunks)} chunks, model: {model_id} "
+          f"(provider: {effective_provider})")
     for i, chunk in enumerate(chunks):
         cache_file = cache_dir / f"chunk_{i:03d}.txt" if cache_dir else None
 
@@ -1002,7 +1108,8 @@ def run_llm_cleanup(merged: list, speaker_map: dict, model_id: str, region: str,
         user_msg = (f"Clean the following meeting transcript segment "
                     f"({i+1}/{len(chunks)}):\n\n{chunk_text}")
         try:
-            result = call_llm(system_prompt, user_msg, model_id, region)
+            result = call_llm(system_prompt, user_msg, model_id, region,
+                              provider=effective_provider)
             cleaned.append(result)
             if cache_file:
                 cache_file.write_text(result, encoding="utf-8")
@@ -1120,10 +1227,16 @@ def main():
                    help="Output file (default: <stem>-transcript.md)")
     p.add_argument("--model", default=None,
                    help="LLM model ID for cleanup (omit to skip LLM cleanup). "
-                        "Auto-detects provider: "
-                        "Bedrock ARN/cross-region ID → Bedrock converse API, "
-                        "claude-* → Anthropic Messages API, "
-                        "gpt-*/deepseek-*/other → OpenAI-compatible API")
+                        "Auto-detects provider; pass --provider to override. "
+                        "Bedrock: ARN, `amazon-bedrock/<id>`, or region prefix "
+                        "(us./eu./apac./global.). "
+                        "Anthropic: bare `claude-*`. "
+                        "OpenAI-compatible: gpt-*, deepseek-*, etc.")
+    p.add_argument("--provider", choices=("bedrock", "anthropic", "openai"),
+                   default=None,
+                   help="Explicit LLM provider (bypasses auto-detection). "
+                        "Recommended when --model contains ambiguous prefixes "
+                        "like `amazon-bedrock/global.anthropic.claude-*`.")
     p.add_argument("--bedrock-region", default="us-west-2",
                    help="AWS region for Bedrock (only used when provider is bedrock)")
     p.add_argument("--speaker-context", type=str, default=None,
@@ -1341,7 +1454,8 @@ def main():
         cleaned_parts = run_llm_cleanup(merged, speaker_map, args.model,
                                         args.bedrock_region, speaker_context,
                                         cache_dir, reference_text, speaker_names,
-                                        speaker_genders_by_name)
+                                        speaker_genders_by_name,
+                                        provider=args.provider)
         if args.clean_cache and cache_dir.exists():
             for f in cache_dir.glob("chunk_*.txt"):
                 f.unlink()
