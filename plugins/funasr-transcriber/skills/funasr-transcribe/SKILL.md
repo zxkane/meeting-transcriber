@@ -158,15 +158,23 @@ python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
 # Bedrock (uses AWS credential chain: IAM role, SSO, ~/.aws/credentials)
 python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
     --lang zh --num-speakers 9 --hotwords hotwords.txt \
-    --model us.anthropic.claude-sonnet-4-6
+    --provider bedrock --model us.anthropic.claude-sonnet-4-6
+
+# Bedrock "global" cross-region profile (recent AWS deployments)
+python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
+    --provider bedrock --model global.anthropic.claude-sonnet-4-6
+
+# Bedrock via litellm-style wrapper (supported; prefix is stripped for boto3)
+python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
+    --provider bedrock --model amazon-bedrock/global.anthropic.claude-sonnet-4-6
 
 # Anthropic API (requires ANTHROPIC_API_KEY env var)
 python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
-    --model claude-sonnet-4-6
+    --provider anthropic --model claude-sonnet-4-6
 
 # OpenAI-compatible API (requires OPENAI_API_KEY env var)
 python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
-    --model gpt-4o
+    --provider openai --model gpt-4o
 
 # Full pipeline with all supporting files + LLM (best quality)
 python3 $SCRIPTS/transcribe_funasr.py episode.m4a \

@@ -1739,5 +1739,316 @@ class TestBuildSystemPromptWithGender:
         assert "female" not in prompt.lower()
 
 
+# ──────────────────────────────────────────────
+# Issue #27 — shownotes parser for title-line format
+# ──────────────────────────────────────────────
+
+class TestExtractSpeakerNamesTitleLineFormat:
+    """Shownotes with role as a standalone heading, names below as
+    'Name: description' lines (小宇宙 / Apple Podcasts common export)."""
+
+    def test_chinese_guest_title_block(self):
+        text = (
+            "💬 本期嘉宾\n"
+            "李雷：资深宏观研究员\n"
+            "韩梅梅：独立投资人\n"
+        )
+        assert tf.extract_speaker_names_from_reference(text) == ["李雷", "韩梅梅"]
+
+    def test_chinese_host_title_block(self):
+        text = (
+            "主播\n"
+            "张三：节目主理人\n"
+        )
+        assert tf.extract_speaker_names_from_reference(text) == ["张三"]
+
+    def test_english_guests_title_block(self):
+        text = (
+            "Guests\n"
+            "Alice: senior analyst at ACME\n"
+            "Bob: independent researcher\n"
+        )
+        assert tf.extract_speaker_names_from_reference(text) == ["Alice", "Bob"]
+
+    def test_mixed_inline_host_and_title_guests(self):
+        text = (
+            "Host: 张三\n"
+            "\n"
+            "💬 本期嘉宾\n"
+            "李雷：资深宏观研究员\n"
+            "韩梅梅：独立投资人\n"
+        )
+        result = tf.extract_speaker_names_from_reference(text)
+        assert result[0] == "张三"
+        assert "李雷" in result
+        assert "韩梅梅" in result
+
+    def test_title_block_stops_at_blank_line(self):
+        text = (
+            "嘉宾\n"
+            "李雷：资深宏观研究员\n"
+            "\n"
+            "相关链接：\n"
+            "王五：unrelated article title writer\n"
+        )
+        assert tf.extract_speaker_names_from_reference(text) == ["李雷"]
+
+    def test_title_block_stops_at_next_heading(self):
+        text = (
+            "嘉宾\n"
+            "李雷：资深宏观研究员\n"
+            "时间戳\n"
+            "王五：unrelated timestamp label\n"
+        )
+        assert tf.extract_speaker_names_from_reference(text) == ["李雷"]
+
+    def test_prose_not_mistaken_for_title_block(self):
+        """Regression guard: generic prose with 'Name: ...' lines must
+        not be captured as guests."""
+        text = (
+            "In today's episode we talk about topics.\n"
+            "Alice said: something interesting.\n"
+            "Bob replied: agreed.\n"
+        )
+        assert tf.extract_speaker_names_from_reference(text) == []
+
+    def test_long_heading_not_treated_as_title(self):
+        """A long line with 'Guest' somewhere is not a standalone heading."""
+        text = (
+            "In this Guest series we explore many perspectives on topics.\n"
+            "Alice: senior analyst\n"
+        )
+        assert tf.extract_speaker_names_from_reference(text) == []
+
+    def test_heading_with_decorative_chars_chinese(self):
+        """Emoji/whitespace decoration around heading should still match."""
+        text = (
+            "  💬  本期嘉宾  \n"
+            "李雷：投资人\n"
+        )
+        assert tf.extract_speaker_names_from_reference(text) == ["李雷"]
+
+    def test_real_world_xiaoyuzhou_style(self):
+        """Realistic shownotes excerpt (paraphrased with placeholder names
+        per CLAUDE.md convention — never use real hosts/guests in tests)."""
+        text = (
+            "🔗 官网地址example.com\n"
+            "💬 本期嘉宾\n"
+            "李雷：资深宏观研究员，业余哲学爱好者\n"
+            "韩梅梅：播客《某某节目》主理人\n"
+            "🪐 时间戳\n"
+            "01:57 开场聊天\n"
+        )
+        result = tf.extract_speaker_names_from_reference(text)
+        assert "李雷" in result
+        assert "韩梅梅" in result
+        assert len(result) == 2
+
+
+# ──────────────────────────────────────────────
+# Issue #28 — iterative swap for N-way speaker rotations
+# ──────────────────────────────────────────────
+
+class TestVerifySpeakerAssignmentNWay:
+    """Pairwise swap cannot fix rotations of 3+ speakers. The function
+    must iterate until all mismatches are resolved (or cap at N-1 swaps)."""
+
+    def test_three_speaker_full_rotation(self):
+        """True mapping is a 3-cycle: id 0→C, 1→A, 2→B.
+        Initial labels (wrong): {0:A, 1:B, 2:C}.
+        After iteration: {0:C, 1:A, 2:B}."""
+        transcript = [
+            make_segment(0, 0, 5000, "大家好我是王五"),       # id 0 is actually 王五
+            make_segment(1, 5000, 10000, "大家好我是张三"),   # id 1 is actually 张三
+            make_segment(2, 10000, 15000, "大家好我是李四"),  # id 2 is actually 李四
+        ]
+        speaker_map = {0: "张三", 1: "李四", 2: "王五"}
+        result = tf.verify_speaker_assignment(
+            transcript, speaker_map, ["张三", "李四", "王五"])
+        assert result[0] == "王五"
+        assert result[1] == "张三"
+        assert result[2] == "李四"
+
+    def test_three_speaker_partial_mismatch(self):
+        """Only two speakers swapped; third is already correct.
+        One pairwise swap suffices."""
+        transcript = [
+            make_segment(0, 0, 5000, "大家好我是张三"),
+            make_segment(1, 5000, 10000, "大家好我是王五"),
+            make_segment(2, 10000, 15000, "你好，我是李四"),
+        ]
+        # id 0 says 张三, currently labeled 张三 → correct.
+        # id 1 says 王五, currently labeled 李四 → mismatch.
+        # id 2 says 李四, currently labeled 王五 → mismatch.
+        speaker_map = {0: "张三", 1: "李四", 2: "王五"}
+        result = tf.verify_speaker_assignment(
+            transcript, speaker_map, ["张三", "李四", "王五"])
+        assert result[0] == "张三"
+        assert result[1] == "王五"
+        assert result[2] == "李四"
+
+    def test_all_correct_no_swap(self):
+        """Regression: all self-intros match labels → no swaps."""
+        transcript = [
+            make_segment(0, 0, 5000, "大家好我是张三"),
+            make_segment(1, 5000, 10000, "大家好我是李四"),
+            make_segment(2, 10000, 15000, "大家好我是王五"),
+        ]
+        speaker_map = {0: "张三", 1: "李四", 2: "王五"}
+        result = tf.verify_speaker_assignment(
+            transcript, speaker_map, ["张三", "李四", "王五"])
+        assert result == {0: "张三", 1: "李四", 2: "王五"}
+
+    def test_iteration_cap_prevents_infinite_loop(self):
+        """Pathological input: repeated irreconcilable mismatches should
+        terminate within N-1 iterations, not loop forever."""
+        # Contradictory self-intros — same speaker id claims two names.
+        transcript = [
+            make_segment(0, 0, 5000, "大家好我是张三"),
+            make_segment(0, 5000, 10000, "其实我是李四"),
+            make_segment(1, 10000, 15000, "大家好我是王五"),
+            make_segment(2, 15000, 20000, "我是李四"),
+        ]
+        speaker_map = {0: "张三", 1: "李四", 2: "王五"}
+        # Must return, must not hang. No assertion on final labels — the
+        # test's goal is termination.
+        result = tf.verify_speaker_assignment(
+            transcript, speaker_map, ["张三", "李四", "王五"])
+        assert isinstance(result, dict)
+        assert set(result.values()) == {"张三", "李四", "王五"}
+
+    def test_four_speaker_rotation(self):
+        """4-speaker rotation: id 0→D, 1→A, 2→B, 3→C. Needs 3 iterations."""
+        transcript = [
+            make_segment(0, 0, 5000, "大家好我是赵六"),
+            make_segment(1, 5000, 10000, "大家好我是张三"),
+            make_segment(2, 10000, 15000, "大家好我是李四"),
+            make_segment(3, 15000, 20000, "大家好我是王五"),
+        ]
+        speaker_map = {0: "张三", 1: "李四", 2: "王五", 3: "赵六"}
+        result = tf.verify_speaker_assignment(
+            transcript, speaker_map,
+            ["张三", "李四", "王五", "赵六"])
+        assert result[0] == "赵六"
+        assert result[1] == "张三"
+        assert result[2] == "李四"
+        assert result[3] == "王五"
+
+
+# ──────────────────────────────────────────────
+# Issue #29 — LLM provider detection for Bedrock prefixes
+# ──────────────────────────────────────────────
+
+class TestDetectLLMProviderBedrockPrefixes:
+    """Expanded Bedrock detection: global., apac., eu., amazon-bedrock/
+    wrapper, bedrock/ wrapper."""
+
+    def test_bedrock_global_prefix(self):
+        assert detect_llm_provider("global.anthropic.claude-sonnet-4-6") == "bedrock"
+
+    def test_bedrock_apac_prefix(self):
+        assert detect_llm_provider("apac.anthropic.claude-sonnet-4-6") == "bedrock"
+
+    def test_bedrock_eu_prefix(self):
+        assert detect_llm_provider("eu.anthropic.claude-sonnet-4-6") == "bedrock"
+
+    def test_bedrock_amazon_bedrock_wrapper(self):
+        assert detect_llm_provider(
+            "amazon-bedrock/global.anthropic.claude-sonnet-4-6") == "bedrock"
+
+    def test_bedrock_amazon_bedrock_wrapper_us_prefix(self):
+        assert detect_llm_provider(
+            "amazon-bedrock/us.anthropic.claude-sonnet-4-6") == "bedrock"
+
+    def test_bedrock_plain_bedrock_wrapper(self):
+        assert detect_llm_provider("bedrock/us.anthropic.claude-sonnet-4-6") == "bedrock"
+
+    def test_bare_claude_still_anthropic(self):
+        """Regression: no Bedrock marker → bare claude ID stays Anthropic."""
+        assert detect_llm_provider("claude-sonnet-4-6") == "anthropic"
+
+    def test_bare_claude_with_version_still_anthropic(self):
+        assert detect_llm_provider("claude-sonnet-4-6-20250929") == "anthropic"
+
+
+class TestCallLLMExplicitProvider:
+    """Explicit provider arg must override auto-detection."""
+
+    def test_explicit_bedrock_over_anthropic_id(self):
+        """Force Bedrock even when model ID is a bare 'claude-*' form."""
+        with patch("llm_utils._call_bedrock", return_value="ok") as mock_bed, \
+             patch("llm_utils._call_anthropic", return_value="wrong") as mock_ant:
+            result = call_llm(
+                "sys", "msg", "claude-sonnet-4-6",
+                region="us-west-2", provider="bedrock")
+            assert result == "ok"
+            mock_bed.assert_called_once()
+            mock_ant.assert_not_called()
+
+    def test_explicit_anthropic_over_bedrock_id(self):
+        with patch("llm_utils._call_anthropic", return_value="ok") as mock_ant, \
+             patch("llm_utils._call_bedrock", return_value="wrong"):
+            result = call_llm(
+                "sys", "msg", "us.anthropic.claude-sonnet-4-6",
+                provider="anthropic")
+            assert result == "ok"
+            mock_ant.assert_called_once()
+
+    def test_no_provider_falls_back_to_detect(self):
+        with patch("llm_utils._call_bedrock", return_value="ok") as mock_bed:
+            result = call_llm(
+                "sys", "msg", "global.anthropic.claude-sonnet-4-6",
+                region="us-west-2")
+            assert result == "ok"
+            mock_bed.assert_called_once()
+
+
+class TestCallLLMBedrockWrapperStripped:
+    """`amazon-bedrock/` and `bedrock/` wrapper prefixes must be stripped
+    before being passed to the boto3 client — AWS doesn't accept them."""
+
+    def test_amazon_bedrock_prefix_stripped(self):
+        captured = {}
+
+        def fake_bedrock(system_prompt, user_message, model_id, region,
+                        max_tokens=8192):
+            captured["model_id"] = model_id
+            return "ok"
+
+        with patch("llm_utils._call_bedrock", side_effect=fake_bedrock):
+            call_llm("sys", "msg",
+                     "amazon-bedrock/global.anthropic.claude-sonnet-4-6",
+                     region="us-west-2")
+        assert captured["model_id"] == "global.anthropic.claude-sonnet-4-6"
+
+    def test_plain_bedrock_prefix_stripped(self):
+        captured = {}
+
+        def fake_bedrock(system_prompt, user_message, model_id, region,
+                        max_tokens=8192):
+            captured["model_id"] = model_id
+            return "ok"
+
+        with patch("llm_utils._call_bedrock", side_effect=fake_bedrock):
+            call_llm("sys", "msg",
+                     "bedrock/us.anthropic.claude-sonnet-4-6",
+                     region="us-west-2")
+        assert captured["model_id"] == "us.anthropic.claude-sonnet-4-6"
+
+    def test_no_prefix_unchanged(self):
+        captured = {}
+
+        def fake_bedrock(system_prompt, user_message, model_id, region,
+                        max_tokens=8192):
+            captured["model_id"] = model_id
+            return "ok"
+
+        with patch("llm_utils._call_bedrock", side_effect=fake_bedrock):
+            call_llm("sys", "msg",
+                     "us.anthropic.claude-sonnet-4-6",
+                     region="us-west-2")
+        assert captured["model_id"] == "us.anthropic.claude-sonnet-4-6"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

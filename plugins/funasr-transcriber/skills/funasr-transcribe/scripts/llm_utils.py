@@ -11,12 +11,42 @@ import time
 from typing import Optional
 
 
+# Bedrock inference-profile region/profile prefixes. These are the
+# documented AWS forms (us., eu., apac., global., etc.) — any lowercase
+# alphanumeric run terminated by a dot counts. Do NOT match just `^[a-z]{2}\.`
+# because `global.` / `apac.` / future prefixes would fall through to the
+# anthropic branch and crash on a missing SDK import.
+_BEDROCK_PREFIX_RE = re.compile(r"^[a-z][a-z0-9]{1,9}\.")
+_BEDROCK_WRAPPERS = ("amazon-bedrock/", "bedrock/")
+
+
+def strip_bedrock_wrapper(model_id: str) -> str:
+    """Strip `amazon-bedrock/` or `bedrock/` wrapper prefix, if present.
+
+    AWS' boto3 client does not accept wrapper-prefixed IDs — the wrappers
+    are a litellm/Mantle-style routing convention, not a real model ID.
+    """
+    for prefix in _BEDROCK_WRAPPERS:
+        if model_id.startswith(prefix):
+            return model_id[len(prefix):]
+    return model_id
+
+
 def detect_llm_provider(model_id: str) -> str:
     """Detect LLM provider from model ID string.
 
     Returns one of: 'bedrock', 'anthropic', 'openai'.
+
+    Bedrock is recognized via ARN, wrapper prefixes (`amazon-bedrock/`,
+    `bedrock/`), or any region/profile prefix like `us.`, `eu.`, `apac.`,
+    `global.`. Bare `claude-*` IDs go to Anthropic; everything else to
+    OpenAI-compatible.
     """
-    if model_id.startswith("arn:aws:bedrock:") or re.match(r"^[a-z]{2}\.", model_id):
+    if model_id.startswith("arn:aws:bedrock:"):
+        return "bedrock"
+    if any(model_id.startswith(p) for p in _BEDROCK_WRAPPERS):
+        return "bedrock"
+    if _BEDROCK_PREFIX_RE.match(model_id):
         return "bedrock"
     if "claude" in model_id and not model_id.startswith("arn:"):
         return "anthropic"
@@ -108,9 +138,21 @@ def is_retryable(e: Exception) -> bool:
 
 def call_llm(system_prompt: str, user_message: str,
              model_id: str, region: Optional[str] = None,
-             max_retries: int = 3) -> str:
-    """Call LLM with auto-detected provider and retry logic."""
-    provider = detect_llm_provider(model_id)
+             max_retries: int = 3,
+             provider: Optional[str] = None) -> str:
+    """Call LLM with configurable provider routing and retry logic.
+
+    `provider` wins over auto-detection when set. Pass it explicitly from
+    CLI wrappers to eliminate misrouting (e.g. a Bedrock profile that
+    happens to contain `claude` in its ID being sent to Anthropic).
+
+    For Bedrock calls, `amazon-bedrock/` and `bedrock/` wrapper prefixes
+    are stripped before the boto3 call — AWS rejects them.
+    """
+    if provider is None:
+        provider = detect_llm_provider(model_id)
+    if provider == "bedrock":
+        model_id = strip_bedrock_wrapper(model_id)
     for attempt in range(max_retries):
         try:
             if provider == "bedrock":
