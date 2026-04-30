@@ -13,7 +13,10 @@
   wheels matching the installed torch + Python + ABI so the install
   completes on CUDA-driver-only hosts (most AWS GPU instances) without
   requiring the CUDA toolkit (`nvcc`). Falls back to a source build only
-  when no matching wheel is published.
+  when no matching wheel is published. **The MiMo GitHub repo is pinned
+  to a known-good commit** (validated against our `MimoAudio.__init__`
+  kwarg contract and runtime deps); override with
+  `MIMO_PINNED_COMMIT=<sha>` to trial a newer upstream.
 - **`--mimo-audio-tag`, `--mimo-batch`, `--mimo-weights-path`,
   `--resume-mimo`:** CLI flags for the new preset. `--resume-mimo` picks up
   from a mid-run failure using `*_mimo_partial.json` with audio-hash

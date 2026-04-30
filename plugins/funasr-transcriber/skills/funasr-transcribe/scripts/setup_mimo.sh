@@ -14,6 +14,12 @@ VENV_DIR="${VENV_DIR:-.venv}"
 MIMO_WEIGHTS_PATH="${MIMO_WEIGHTS_PATH:-${HF_HOME:-$HOME/.cache/huggingface}}"
 MIMO_REPO_URL="https://github.com/XiaomiMiMo/MiMo-V2.5-ASR.git"
 MIMO_REPO_DIR="$VENV_DIR/mimo"
+# Pinned to a known-good commit validated in e2e against our MiMoAudio
+# kwarg contract. Upgrading this pin is a deliberate act: verify
+# MimoAudio.__init__ signature (expects mimo_audio_tokenizer_path=, not
+# tokenizer_path=) and that the declared deps still satisfy einops/addict
+# before bumping. Users can override to trial a newer upstream.
+MIMO_PINNED_COMMIT="${MIMO_PINNED_COMMIT:-210ef16815b187e05ccc38d627af0d61677afe88}"
 
 echo "=== MiMo-V2.5-ASR Install ==="
 echo "  venv:     $VENV_DIR"
@@ -28,12 +34,33 @@ fi
 # shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
-# 1. Clone MiMo repo (idempotent)
+# 1. Clone MiMo repo pinned to a known-good commit (supply-chain hygiene).
+#    Idempotent: if the repo is already at the pinned SHA we skip; if it's
+#    checked out to a different SHA we fast-forward to the pin.
 if [ ! -d "$MIMO_REPO_DIR/.git" ]; then
-    echo "[1/4] Cloning $MIMO_REPO_URL into $MIMO_REPO_DIR..."
-    git clone --depth 1 "$MIMO_REPO_URL" "$MIMO_REPO_DIR"
+    echo "[1/4] Cloning $MIMO_REPO_URL at $MIMO_PINNED_COMMIT into $MIMO_REPO_DIR..."
+    git clone --filter=blob:none --no-checkout "$MIMO_REPO_URL" "$MIMO_REPO_DIR"
+    git -C "$MIMO_REPO_DIR" fetch --depth 1 origin "$MIMO_PINNED_COMMIT"
+    git -C "$MIMO_REPO_DIR" checkout --detach "$MIMO_PINNED_COMMIT"
 else
-    echo "[1/4] MiMo repo already present at $MIMO_REPO_DIR — skipping clone."
+    current=$(git -C "$MIMO_REPO_DIR" rev-parse HEAD 2>/dev/null || echo "")
+    if [ "$current" = "$MIMO_PINNED_COMMIT" ]; then
+        echo "[1/4] MiMo repo already at pinned commit ${MIMO_PINNED_COMMIT:0:10} — skipping."
+    else
+        echo "[1/4] MiMo repo at ${current:0:10}, fast-forwarding to ${MIMO_PINNED_COMMIT:0:10}..."
+        git -C "$MIMO_REPO_DIR" fetch --depth 1 origin "$MIMO_PINNED_COMMIT"
+        git -C "$MIMO_REPO_DIR" checkout --detach "$MIMO_PINNED_COMMIT"
+    fi
+fi
+
+# Post-checkout verification: HEAD must equal the pinned SHA. Guards
+# against tampered on-disk state or a --filter race. Abort loudly rather
+# than installing from an unverified tree.
+resolved=$(git -C "$MIMO_REPO_DIR" rev-parse HEAD)
+if [ "$resolved" != "$MIMO_PINNED_COMMIT" ]; then
+    echo "ERROR: MiMo repo HEAD ($resolved) does not match pinned commit ($MIMO_PINNED_COMMIT)."
+    echo "  Refusing to proceed. Remove $MIMO_REPO_DIR and re-run to reinstall."
+    exit 1
 fi
 
 # 2. Install MiMo's Python dependencies. Upstream requirements.txt is
