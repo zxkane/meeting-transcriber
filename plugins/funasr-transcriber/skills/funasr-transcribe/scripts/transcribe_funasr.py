@@ -764,12 +764,16 @@ def verify_speaker_assignment(transcript: list, speaker_map: dict,
     for name in speaker_names:
         all_variants.extend(_name_variants(name))
 
-    max_iterations = max(1, len(speaker_map) - 1)
+    # Cap iterations at N: any N-element cycle resolves in ≤ N-1 swaps,
+    # plus one final pass to verify convergence (and `break`).
+    max_iterations = max(2, len(speaker_map))
     swap_count = 0
+    converged = False
     for _ in range(max_iterations):
-        mismatches, confirmations = _scan_self_intros(
+        mismatches, _ = _scan_self_intros(
             early_segments, speaker_map, all_variants)
         if not mismatches:
+            converged = True
             break
         m = mismatches[0]
         print(f"  Speaker verification: at [{format_time_ms(m['time_ms'])}], "
@@ -789,6 +793,11 @@ def verify_speaker_assignment(transcript: list, speaker_map: dict,
             speaker_map[id_a] = m["actual_name"]
             print(f"  Relabeled: SPEAKER_{id_a} → {m['actual_name']}")
         swap_count += 1
+
+    if not converged and swap_count > 0:
+        print(f"  WARNING: speaker verification hit iteration cap "
+              f"({max_iterations}) with unresolved mismatches. "
+              f"Contradictory self-intros — manual review recommended.")
 
     if swap_count == 0:
         _, confirmations = _scan_self_intros(

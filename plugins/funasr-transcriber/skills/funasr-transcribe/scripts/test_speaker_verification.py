@@ -2050,5 +2050,99 @@ class TestCallLLMBedrockWrapperStripped:
         assert captured["model_id"] == "us.anthropic.claude-sonnet-4-6"
 
 
+# ──────────────────────────────────────────────
+# PR-review feedback: additional guards
+# ──────────────────────────────────────────────
+
+class TestStripBedrockWrapperMalformed:
+    """Typo-class inputs (`bedrock//foo`, lone `amazon-bedrock/`) must
+    raise loudly instead of forwarding a bad ID to boto3."""
+
+    def test_double_slash_typo_raises(self):
+        from llm_utils import strip_bedrock_wrapper
+        with pytest.raises(ValueError, match="Malformed Bedrock model ID"):
+            strip_bedrock_wrapper("bedrock//foo")
+
+    def test_amazon_bedrock_double_slash_raises(self):
+        from llm_utils import strip_bedrock_wrapper
+        with pytest.raises(ValueError, match="Malformed Bedrock model ID"):
+            strip_bedrock_wrapper("amazon-bedrock//global.anthropic.claude-sonnet-4-6")
+
+    def test_bare_wrapper_raises(self):
+        from llm_utils import strip_bedrock_wrapper
+        with pytest.raises(ValueError, match="Malformed Bedrock model ID"):
+            strip_bedrock_wrapper("bedrock/")
+
+    def test_valid_input_unchanged(self):
+        from llm_utils import strip_bedrock_wrapper
+        assert strip_bedrock_wrapper("us.anthropic.claude-sonnet-4-6") == \
+               "us.anthropic.claude-sonnet-4-6"
+
+
+class TestCallLLMProviderMismatch:
+    """When --provider disagrees with auto-detected provider, a
+    'Note:' line must be printed so users can connect SDK errors to
+    the override choice."""
+
+    def test_mismatch_note_printed(self, capsys):
+        with patch("llm_utils._call_anthropic", return_value="ok"):
+            call_llm("sys", "msg",
+                     "us.anthropic.claude-sonnet-4-6",
+                     provider="anthropic")
+        captured = capsys.readouterr().out
+        assert "explicit --provider=anthropic overrides detected provider=bedrock" in captured
+
+    def test_matching_provider_no_note(self, capsys):
+        with patch("llm_utils._call_bedrock", return_value="ok"):
+            call_llm("sys", "msg",
+                     "us.anthropic.claude-sonnet-4-6",
+                     region="us-west-2", provider="bedrock")
+        captured = capsys.readouterr().out
+        assert "overrides detected provider" not in captured
+
+    def test_implicit_no_note(self, capsys):
+        with patch("llm_utils._call_bedrock", return_value="ok"):
+            call_llm("sys", "msg",
+                     "us.anthropic.claude-sonnet-4-6",
+                     region="us-west-2")
+        captured = capsys.readouterr().out
+        assert "overrides detected provider" not in captured
+
+
+class TestVerifySpeakerAssignmentCapWarning:
+    """When pairwise-swap iteration exhausts the cap with unresolved
+    mismatches (contradictory self-intros), the code must surface a
+    WARNING rather than silently returning a partially-corrected map."""
+
+    def test_cap_exhaustion_warning(self, capsys):
+        # Contradictory: id 0 claims two different names.
+        transcript = [
+            make_segment(0, 0, 5000, "大家好我是张三"),
+            make_segment(0, 5000, 10000, "其实我是李四"),
+            make_segment(1, 10000, 15000, "大家好我是王五"),
+            make_segment(2, 15000, 20000, "我是李四"),
+        ]
+        speaker_map = {0: "张三", 1: "李四", 2: "王五"}
+        tf.verify_speaker_assignment(
+            transcript, speaker_map, ["张三", "李四", "王五"])
+        captured = capsys.readouterr().out
+        assert "hit iteration cap" in captured
+
+    def test_clean_convergence_no_cap_warning(self, capsys):
+        """4-speaker rotation resolves in exactly N-1=3 swaps → no warning."""
+        transcript = [
+            make_segment(0, 0, 5000, "大家好我是赵六"),
+            make_segment(1, 5000, 10000, "大家好我是张三"),
+            make_segment(2, 10000, 15000, "大家好我是李四"),
+            make_segment(3, 15000, 20000, "大家好我是王五"),
+        ]
+        speaker_map = {0: "张三", 1: "李四", 2: "王五", 3: "赵六"}
+        tf.verify_speaker_assignment(
+            transcript, speaker_map,
+            ["张三", "李四", "王五", "赵六"])
+        captured = capsys.readouterr().out
+        assert "hit iteration cap" not in captured
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -25,10 +25,18 @@ def strip_bedrock_wrapper(model_id: str) -> str:
 
     AWS' boto3 client does not accept wrapper-prefixed IDs — the wrappers
     are a litellm/Mantle-style routing convention, not a real model ID.
+    Raises ValueError when the stripped remainder is empty or starts with
+    `/` (indicating a typo like `bedrock//foo`), so the caller surfaces a
+    clear message instead of an opaque boto3 validation error downstream.
     """
     for prefix in _BEDROCK_WRAPPERS:
         if model_id.startswith(prefix):
-            return model_id[len(prefix):]
+            stripped = model_id[len(prefix):]
+            if not stripped or stripped.startswith("/"):
+                raise ValueError(
+                    f"Malformed Bedrock model ID after wrapper strip: "
+                    f"{model_id!r} → {stripped!r}")
+            return stripped
     return model_id
 
 
@@ -151,6 +159,14 @@ def call_llm(system_prompt: str, user_message: str,
     """
     if provider is None:
         provider = detect_llm_provider(model_id)
+    else:
+        detected = detect_llm_provider(model_id)
+        if detected != provider:
+            # Soft warning — explicit intent wins, but surface the mismatch
+            # so SDK errors later aren't mystifying (e.g. --provider anthropic
+            # with an ARN).
+            print(f"  Note: explicit --provider={provider} overrides detected "
+                  f"provider={detected} for model {model_id!r}")
     if provider == "bedrock":
         model_id = strip_bedrock_wrapper(model_id)
     for attempt in range(max_retries):
