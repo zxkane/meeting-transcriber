@@ -1449,7 +1449,6 @@ def main():
         if args.lang == "mimo":
             import mimo_asr
             mimo_weights = resolve_mimo_weights_path(args.mimo_weights_path)
-            os.environ["HF_HOME"] = mimo_weights  # propagate to HF libs
             transcript = mimo_asr.transcribe_with_mimo(
                 asr_audio,
                 num_speakers=num_speakers,
