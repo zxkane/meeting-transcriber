@@ -2,24 +2,38 @@
 # Set up Python venv with FunASR and dependencies.
 # Detects GPU/CUDA automatically; falls back to CPU-only PyTorch.
 #
+# Requires Python 3.12 (needed by the --lang mimo preset even if INSTALL_MIMO
+# is not set, to keep dependency resolution consistent across presets).
+#
 # Usage:
-#   bash setup_env.sh            # auto-detect
+#   bash setup_env.sh            # auto-detect CUDA
 #   bash setup_env.sh cpu        # force CPU-only
 #   bash setup_env.sh cu121      # force CUDA 12.1
+#
+#   INSTALL_MIMO=1 bash setup_env.sh
+#       After the base install, also run setup_mimo.sh to clone the MiMo repo,
+#       install flash-attn, and download MiMo weights. Opt-in because the
+#       download is ~20 GB and flash-attn compile takes 10–30 min.
 
 set -euo pipefail
 
 VENV_DIR="${VENV_DIR:-.venv}"
 FORCE_VARIANT="${1:-auto}"
 AUTO_YES="${AUTO_YES:-}"
+INSTALL_MIMO="${INSTALL_MIMO:-}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "=== FunASR Environment Setup ==="
 echo ""
 echo "This script will:"
 echo "  - Install ffmpeg (system package) if not present"
-echo "  - Create a Python venv at $VENV_DIR"
+echo "  - Require Python 3.12; rebuild $VENV_DIR if it was made with another version"
 echo "  - Install PyTorch, FunASR, modelscope, boto3 into the venv"
 echo "  - Patch FunASR's clustering for long-audio performance"
+if [ -n "$INSTALL_MIMO" ]; then
+    echo "  - INSTALL_MIMO=1 set: also clone MiMo repo + flash-attn + download weights"
+fi
 echo ""
 
 if [ -z "$AUTO_YES" ]; then
@@ -48,11 +62,42 @@ if ! command -v ffmpeg &>/dev/null; then
     fi
 fi
 
+# Require Python 3.12
+if ! command -v python3.12 &>/dev/null; then
+    echo "ERROR: python3.12 is required but not found."
+    echo ""
+    echo "Install instructions:"
+    echo "  Ubuntu 24.04:  sudo apt install python3.12 python3.12-venv"
+    echo "  Ubuntu 22.04:  add deadsnakes PPA, then:"
+    echo "                 sudo apt install python3.12 python3.12-venv"
+    echo "                 https://launchpad.net/~deadsnakes/+archive/ubuntu/ppa"
+    echo "  macOS:         brew install python@3.12"
+    echo "  Other:         https://www.python.org/downloads/"
+    exit 1
+fi
+PY=python3.12
+
+# Rebuild venv if it exists but isn't 3.12
+if [ -d "$VENV_DIR" ]; then
+    EXISTING_PY="$VENV_DIR/bin/python3"
+    if [ -x "$EXISTING_PY" ]; then
+        EXISTING_VER=$("$EXISTING_PY" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || echo "")
+        if [ "$EXISTING_VER" != "3.12" ]; then
+            echo "Existing venv is Python $EXISTING_VER, rebuilding for 3.12..."
+            rm -rf "$VENV_DIR"
+        fi
+    else
+        echo "Existing venv looks broken (no python3), rebuilding..."
+        rm -rf "$VENV_DIR"
+    fi
+fi
+
 # Create venv
 if [ ! -d "$VENV_DIR" ]; then
-    echo "Creating venv: $VENV_DIR"
-    python3 -m venv "$VENV_DIR"
+    echo "Creating venv: $VENV_DIR (Python 3.12)"
+    "$PY" -m venv "$VENV_DIR"
 fi
+# shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
 # Detect CUDA
@@ -82,12 +127,11 @@ else
     pip install -q torch torchaudio --index-url "https://download.pytorch.org/whl/$FORCE_VARIANT"
 fi
 
-# Install FunASR + deps
+# Install FunASR + deps (scikit-learn is new: MiMo path uses KMeans)
 echo "Installing FunASR and dependencies..."
-pip install -q -U funasr modelscope boto3
+pip install -q -U funasr modelscope boto3 scikit-learn soundfile
 
 # Patch clustering for long audio
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ -f "$SCRIPT_DIR/patch_clustering.py" ]; then
     echo "Applying clustering optimization patch..."
     if ! python3 "$SCRIPT_DIR/patch_clustering.py" --yes; then
@@ -97,6 +141,13 @@ if [ -f "$SCRIPT_DIR/patch_clustering.py" ]; then
 else
     echo "WARNING: patch_clustering.py not found at $SCRIPT_DIR"
     echo "  Long-audio clustering optimization will not be applied."
+fi
+
+# Optional: install MiMo
+if [ -n "$INSTALL_MIMO" ]; then
+    echo ""
+    echo "=== INSTALL_MIMO=1 detected — invoking setup_mimo.sh ==="
+    bash "$SCRIPT_DIR/setup_mimo.sh"
 fi
 
 echo ""
