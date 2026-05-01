@@ -4,11 +4,11 @@ on:
   push:
     branches: [main]
     paths:
-      - 'plugins/funasr-transcriber/skills/funasr-transcribe/scripts/**'
+      - 'plugins/audio-transcriber/skills/audio-transcribe/scripts/**'
       - '.github/workflows/test.yml'
   pull_request:
     paths:
-      - 'plugins/funasr-transcriber/skills/funasr-transcribe/scripts/**'
+      - 'plugins/audio-transcriber/skills/audio-transcribe/scripts/**'
       - '.github/workflows/test.yml'
 
 permissions:
@@ -31,5 +31,5 @@ jobs:
         run: pip install pytest
 
       - name: Run tests
-        working-directory: plugins/funasr-transcriber/skills/funasr-transcribe/scripts
+        working-directory: plugins/audio-transcriber/skills/audio-transcribe/scripts
         run: python -m pytest test_speaker_verification.py -v

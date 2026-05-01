@@ -56,3 +56,8 @@ tmp/
 *_chunks/
 *_raw_transcript.json
 *.opus
+
+# Test artifact (pre-existing leak from test_json_out_writes_to_custom_path
+# in test_speaker_verification.py — writes test-transcript.md to CWD when
+# the test doesn't pass --output)
+**/test-transcript.md

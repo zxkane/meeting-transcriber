@@ -3,7 +3,7 @@ name: ClawHub Skill Publish
 on:
   pull_request:
     paths:
-      - 'plugins/funasr-transcriber/skills/funasr-transcribe/SKILL.md'
+      - 'plugins/audio-transcriber/skills/audio-transcribe/SKILL.md'
       - '.github/workflows/clawhub-publish.yml'
   push:
     tags:
@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
       - id: read
         run: |
-          version=$(grep '^version:' plugins/funasr-transcriber/skills/funasr-transcribe/SKILL.md | head -1 | awk '{print $2}')
+          version=$(grep '^version:' plugins/audio-transcriber/skills/audio-transcribe/SKILL.md | head -1 | awk '{print $2}')
           if [ -z "$version" ]; then
             echo "Error: Could not extract version from SKILL.md" >&2
             exit 1
@@ -39,7 +39,7 @@ jobs:
         run: |
           python3 -c "
           import yaml, sys
-          with open('plugins/funasr-transcriber/skills/funasr-transcribe/SKILL.md') as f:
+          with open('plugins/audio-transcriber/skills/audio-transcribe/SKILL.md') as f:
               front = f.read().split('---')[1]
           data = yaml.safe_load(front)
           for key in ('name', 'version', 'description'):
@@ -61,4 +61,4 @@ jobs:
       - run: bunx clawhub login --token "$CLAWHUB_TOKEN"
         env:
           CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
-      - run: bunx clawhub publish plugins/funasr-transcriber/skills/funasr-transcribe --slug zxkane-audio-transcriber-funasr --version ${{ needs.resolve-version.outputs.version }} --tags latest
+      - run: bunx clawhub publish plugins/audio-transcriber/skills/audio-transcribe --slug zxkane-audio-transcriber-funasr --version ${{ needs.resolve-version.outputs.version }} --tags latest

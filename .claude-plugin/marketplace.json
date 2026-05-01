@@ -1,9 +1,9 @@
 {
-  "name": "audio-transcriber-funasr",
+  "name": "audio-transcriber",
   "version": "1.0.0",
-  "description": "Multi-language meeting and podcast transcription with FunASR (Paraformer + CAM++ speaker diarization) and LLM cleanup. Supports 99 languages, GPU and CPU.",
+  "description": "Multi-speaker meeting and podcast transcription with FunASR (Paraformer / SenseVoice / Whisper) and MiMo-V2.5-ASR engines, speaker diarization (CAM++), and LLM cleanup. Supports 99 languages, GPU and CPU.",
   "author": "zxkane",
   "license": "MIT",
-  "homepage": "https://github.com/zxkane/audio-transcriber-funasr",
-  "tags": ["audio", "transcription", "funasr", "chinese", "speech-to-text", "speaker-diarization", "meeting-minutes", "podcast", "interview", "whisper", "multilingual"]
+  "homepage": "https://github.com/zxkane/audio-transcriber",
+  "tags": ["audio", "transcription", "funasr", "mimo-asr", "xiaomi-mimo", "chinese", "speech-to-text", "speaker-diarization", "meeting-minutes", "podcast", "interview", "whisper", "multilingual", "multi-engine-asr"]
 }

@@ -124,5 +124,5 @@ HF_HOME="$MIMO_WEIGHTS_PATH" \
 
 echo ""
 echo "=== MiMo install complete ==="
-echo "  Use with: python3 transcribe_funasr.py <audio> --lang mimo \\"
+echo "  Use with: python3 transcribe.py <audio> --lang mimo \\"
 echo "               --mimo-weights-path $MIMO_WEIGHTS_PATH"

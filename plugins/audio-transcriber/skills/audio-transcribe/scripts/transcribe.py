@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FunASR: Multi-language meeting transcription with speaker diarization + LLM cleanup.
+"""Audio transcriber: Multi-language meeting transcription with FunASR + MiMo-V2.5-ASR, speaker diarization, LLM cleanup.
 
 Four-phase pipeline optimized for multi-speaker meetings:
   Phase 0: Audio preprocessing (ffmpeg conversion + duration validation)
@@ -19,35 +19,35 @@ First run auto-downloads models from ModelScope.
 
 Usage:
   # Chinese meeting with hotwords (names, terms)
-  python3 transcribe_funasr.py meeting.wav --lang zh --num-speakers 9 \\
+  python3 transcribe.py meeting.wav --lang zh --num-speakers 9 \\
       --hotwords "张三 李四 ClawCon Rebase"
 
   # Hotwords from file (one per line)
-  python3 transcribe_funasr.py meeting.wav --lang zh --hotwords hotwords.txt
+  python3 transcribe.py meeting.wav --lang zh --hotwords hotwords.txt
 
   # English meeting
-  python3 transcribe_funasr.py meeting.wav --lang en --num-speakers 4
+  python3 transcribe.py meeting.wav --lang en --num-speakers 4
 
   # Auto-detect language (no speaker diarization — use zh/en for that)
-  python3 transcribe_funasr.py meeting.wav --lang auto
+  python3 transcribe.py meeting.wav --lang auto
 
   # Whisper for any language (no speaker diarization — use zh/en for that)
-  python3 transcribe_funasr.py meeting.wav --lang whisper
+  python3 transcribe.py meeting.wav --lang whisper
 
   # With real speaker names
-  python3 transcribe_funasr.py meeting.wav --speakers "Alice,Bob,Carol"
+  python3 transcribe.py meeting.wav --speakers "Alice,Bob,Carol"
 
   # CPU mode
-  python3 transcribe_funasr.py meeting.wav --lang zh --device cpu
+  python3 transcribe.py meeting.wav --lang zh --device cpu
 
   # Raw transcription only (no LLM)
-  python3 transcribe_funasr.py meeting.wav --skip-llm
+  python3 transcribe.py meeting.wav --skip-llm
 
   # Resume interrupted LLM cleanup
-  python3 transcribe_funasr.py meeting.wav --skip-transcribe
+  python3 transcribe.py meeting.wav --skip-transcribe
 
   # Speaker context JSON to help LLM identify speakers
-  python3 transcribe_funasr.py meeting.wav --speaker-context context.json
+  python3 transcribe.py meeting.wav --speaker-context context.json
 """
 
 import argparse

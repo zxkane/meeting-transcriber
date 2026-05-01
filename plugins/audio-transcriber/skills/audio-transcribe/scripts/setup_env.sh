@@ -24,7 +24,7 @@ INSTALL_MIMO="${INSTALL_MIMO:-}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-echo "=== FunASR Environment Setup ==="
+echo "=== Audio Transcriber Environment Setup ==="
 echo ""
 echo "This script will:"
 echo "  - Install ffmpeg (system package) if not present"
