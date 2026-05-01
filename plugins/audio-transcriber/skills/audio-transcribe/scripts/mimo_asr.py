@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""MiMo-V2.5-ASR local inference integration for funasr-transcribe.
+"""MiMo-V2.5-ASR local inference integration for audio-transcribe.
 
 Runs XiaomiMiMo/MiMo-V2.5-ASR on a local CUDA GPU, reusing the existing
 pipeline's FSMN VAD segmentation and CAM++ speaker clustering so the output

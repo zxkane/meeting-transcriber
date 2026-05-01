@@ -514,12 +514,12 @@ class TestResolveHfSnapshot:
 
 class TestCliWiring:
     def test_lang_mimo_in_supported(self):
-        import transcribe_funasr as tf
+        import transcribe as tf
         assert "mimo" in tf.SUPPORTED_LANGS
         assert "mimo" in tf.MODEL_PRESETS
 
     def test_hotwords_warning_with_mimo(self, capsys):
-        import transcribe_funasr as tf
+        import transcribe as tf
         resolved = tf.warn_on_incompatible_flags(
             lang="mimo", hotwords="foo bar", batch_size=300, default_batch=300,
         )
@@ -528,7 +528,7 @@ class TestCliWiring:
         assert "hotwords" in captured.out.lower()
 
     def test_batch_size_warning_with_mimo(self, capsys):
-        import transcribe_funasr as tf
+        import transcribe as tf
         tf.warn_on_incompatible_flags(
             lang="mimo", hotwords=None, batch_size=100, default_batch=300,
         )
@@ -536,7 +536,7 @@ class TestCliWiring:
         assert "batch-size" in captured.out.lower() or "batch_size" in captured.out.lower()
 
     def test_no_warning_with_zh(self, capsys):
-        import transcribe_funasr as tf
+        import transcribe as tf
         tf.warn_on_incompatible_flags(
             lang="zh", hotwords="foo", batch_size=300, default_batch=300,
         )
@@ -544,7 +544,7 @@ class TestCliWiring:
         assert captured.out.strip() == ""
 
     def test_weights_path_precedence(self, monkeypatch):
-        import transcribe_funasr as tf
+        import transcribe as tf
         monkeypatch.setenv("HF_HOME", "/env/hf")
         assert tf.resolve_mimo_weights_path("/cli/hf") == "/cli/hf"
         assert tf.resolve_mimo_weights_path(None) == "/env/hf"

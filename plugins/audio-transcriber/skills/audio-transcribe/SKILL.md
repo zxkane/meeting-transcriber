@@ -1,6 +1,6 @@
 ---
-name: funasr-transcribe
-version: 1.7.0
+name: audio-transcribe
+version: 1.7.1
 description: >
   This skill should be used when the user explicitly asks to "transcribe a meeting",
   "transcribe audio", "transcribe a meeting recording",
@@ -11,12 +11,14 @@ description: >
   "multi-speaker transcription", "transcribe a podcast",
   "transcribe podcast episode", "transcribe an interview",
   "convert podcast to text", "podcast to transcript",
-  or mentions FunASR, Paraformer, SenseVoice, Whisper, meeting
-  transcription, podcast transcription, or speaker diarization.
+  or mentions FunASR, Paraformer, SenseVoice, Whisper, MiMo, MiMo-V2.5-ASR,
+  meeting transcription, podcast transcription, or speaker diarization.
   Supports multi-speaker meeting and podcast transcription in Chinese,
-  English, Japanese, Korean, Cantonese, and 99 languages (via Whisper)
-  with automatic speaker diarization and hotword biasing.
-  Works on both GPU and CPU.
+  English, Japanese, Korean, Cantonese, and 99 languages (via Whisper),
+  plus Xiaomi MiMo-V2.5-ASR (8B, local GPU) for stronger proper-noun and
+  code-switching accuracy. Automatic speaker diarization via CAM++,
+  hotword biasing (FunASR path), LLM cleanup. FunASR works on GPU and CPU;
+  MiMo requires a local CUDA GPU with >=20GB VRAM.
 metadata:
   openclaw:
     requires:
@@ -35,19 +37,23 @@ metadata:
         required: false
         description: "Base URL for OpenAI-compatible API (vLLM, Ollama, etc.)"
     emoji: "🎙️"
-    homepage: "https://github.com/zxkane/audio-transcriber-funasr"
+    homepage: "https://github.com/zxkane/audio-transcriber"
 ---
 
-# FunASR Meeting & Podcast Transcription
+# Meeting & Podcast Transcription (FunASR + MiMo)
 
 Transcribe multi-speaker audio into structured Markdown with automatic
-speaker diarization, hotword biasing, and optional LLM cleanup.
+speaker diarization, hotword biasing, and optional LLM cleanup. Two
+ASR engine families are available: **FunASR** (Paraformer / SenseVoice /
+Whisper — fast, cheap, GPU or CPU, 99 languages) and **MiMo-V2.5-ASR**
+(Xiaomi's 8B model, local GPU only, stronger on proper nouns and
+code-switching). Both share the same VAD + speaker-clustering stack.
 
 All scripts run directly from the plugin directory — no copying needed.
 Define this shorthand at the start of every session:
 
 ```bash
-SCRIPTS=${CLAUDE_PLUGIN_ROOT}/skills/funasr-transcribe/scripts
+SCRIPTS=${CLAUDE_PLUGIN_ROOT}/skills/audio-transcribe/scripts
 ```
 
 ## Supported Languages
@@ -141,45 +147,45 @@ and speaker name refinement, pass `--model <model-id>`. Use LLM cleanup when:
 
 ```bash
 # Chinese meeting with hotwords (local-only, no LLM)
-python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
+python3 $SCRIPTS/transcribe.py meeting.wav \
     --lang zh --num-speakers 9 --hotwords hotwords.txt
 
 # English meeting with speaker names
-python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
+python3 $SCRIPTS/transcribe.py meeting.wav \
     --lang en --speakers "Alice,Bob,Carol,Dave"
 
 # Auto-detect language (zh/en/ja/ko/yue)
-python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
+python3 $SCRIPTS/transcribe.py meeting.wav \
     --lang auto --num-speakers 6
 
 # Whisper for any language
-python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
+python3 $SCRIPTS/transcribe.py meeting.wav \
     --lang whisper --num-speakers 4
 
 # Enable LLM cleanup for polished output (requires --model)
 # Bedrock (uses AWS credential chain: IAM role, SSO, ~/.aws/credentials)
-python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
+python3 $SCRIPTS/transcribe.py meeting.wav \
     --lang zh --num-speakers 9 --hotwords hotwords.txt \
     --provider bedrock --model us.anthropic.claude-sonnet-4-6
 
 # Bedrock "global" cross-region profile (recent AWS deployments)
-python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
+python3 $SCRIPTS/transcribe.py meeting.wav \
     --provider bedrock --model global.anthropic.claude-sonnet-4-6
 
 # Bedrock via litellm-style wrapper (supported; prefix is stripped for boto3)
-python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
+python3 $SCRIPTS/transcribe.py meeting.wav \
     --provider bedrock --model amazon-bedrock/global.anthropic.claude-sonnet-4-6
 
 # Anthropic API (requires ANTHROPIC_API_KEY env var)
-python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
+python3 $SCRIPTS/transcribe.py meeting.wav \
     --provider anthropic --model claude-sonnet-4-6
 
 # OpenAI-compatible API (requires OPENAI_API_KEY env var)
-python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
+python3 $SCRIPTS/transcribe.py meeting.wav \
     --provider openai --model gpt-4o
 
 # Full pipeline with all supporting files + LLM (best quality)
-python3 $SCRIPTS/transcribe_funasr.py episode.m4a \
+python3 $SCRIPTS/transcribe.py episode.m4a \
     --lang zh --num-speakers 2 \
     --hotwords hotwords.txt \
     --speakers "关羽,张飞" \
@@ -188,7 +194,7 @@ python3 $SCRIPTS/transcribe_funasr.py episode.m4a \
     --model us.anthropic.claude-sonnet-4-6
 
 # Resume interrupted LLM cleanup
-python3 $SCRIPTS/transcribe_funasr.py meeting.wav \
+python3 $SCRIPTS/transcribe.py meeting.wav \
     --skip-transcribe --model us.anthropic.claude-sonnet-4-6
 ```
 
@@ -214,7 +220,7 @@ python3 $SCRIPTS/verify_speakers.py meeting_raw_transcript.json \
     --speaker-context speaker-context.json --fix
 
 # Then regenerate the markdown with corrected labels
-python3 $SCRIPTS/transcribe_funasr.py original.m4a \
+python3 $SCRIPTS/transcribe.py original.m4a \
     --skip-transcribe --clean-cache
 ```
 
@@ -263,7 +269,7 @@ AUTO_YES=1 INSTALL_MIMO=1 \
 **Run:**
 
 ```bash
-python3 $SCRIPTS/transcribe_funasr.py podcast.m4a \
+python3 $SCRIPTS/transcribe.py podcast.m4a \
     --lang mimo --num-speakers 2 \
     --mimo-weights-path /mnt/models/hf
 ```
@@ -271,7 +277,7 @@ python3 $SCRIPTS/transcribe_funasr.py podcast.m4a \
 **Resume after failure:**
 
 ```bash
-python3 $SCRIPTS/transcribe_funasr.py podcast.m4a \
+python3 $SCRIPTS/transcribe.py podcast.m4a \
     --lang mimo --resume-mimo --mimo-weights-path /mnt/models/hf
 ```
 
@@ -351,7 +357,7 @@ or OOM kills. See `references/pipeline-details.md` for workarounds:
 
 - **`references/pipeline-details.md`** — Architecture, model specs, benchmarks,
   speaker role verification, hotword effectiveness, clustering patch
-- **`scripts/transcribe_funasr.py`** — Main transcription pipeline
+- **`scripts/transcribe.py`** — Main transcription pipeline
 - **`scripts/verify_speakers.py`** — Speaker label verification & fix
 - **`scripts/llm_utils.py`** — Shared LLM infrastructure (Bedrock/Anthropic/OpenAI)
 - **`scripts/setup_env.sh`** — Environment setup (venv + deps + patch)

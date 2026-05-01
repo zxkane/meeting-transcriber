@@ -2,7 +2,7 @@
 """Tests for speaker verification pipeline.
 
 Covers: llm_utils, verify_speakers, and speaker-related functions
-in transcribe_funasr. All LLM calls are mocked.
+in transcribe. All LLM calls are mocked.
 """
 
 import argparse
@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from llm_utils import detect_llm_provider, is_retryable, call_llm
 import speaker_gender as sg
-import transcribe_funasr as tf
+import transcribe as tf
 import verify_speakers as vs
 
 
@@ -406,7 +406,7 @@ class TestVerifyMeeting:
 
 
 # ──────────────────────────────────────────────
-# transcribe_funasr: speaker verification functions
+# transcribe: speaker verification functions
 # ──────────────────────────────────────────────
 
 
@@ -829,7 +829,7 @@ class TestBuildSystemPrompt:
 
 
 # ──────────────────────────────────────────────
-# transcribe_funasr: validate_lang_diarization
+# transcribe: validate_lang_diarization
 # ──────────────────────────────────────────────
 
 class TestValidateLangDiarization:
@@ -857,7 +857,7 @@ class TestValidateLangDiarization:
 
 
 # ──────────────────────────────────────────────
-# transcribe_funasr: --model-cache-dir
+# transcribe: --model-cache-dir
 # ──────────────────────────────────────────────
 
 class TestModelCacheDir:
@@ -877,7 +877,7 @@ class TestModelCacheDir:
 
 
 # ──────────────────────────────────────────────
-# transcribe_funasr: parse_funasr_results
+# transcribe: parse_funasr_results
 # ──────────────────────────────────────────────
 
 class TestParseFunasrResults:
@@ -965,11 +965,11 @@ class TestParseFunasrResults:
 
 
 # ──────────────────────────────────────────────
-# transcribe_funasr: _verify_speaker_roles_via_llm
+# transcribe: _verify_speaker_roles_via_llm
 # ──────────────────────────────────────────────
 
 class TestVerifySpeakerRolesViaLLM:
-    @patch("transcribe_funasr.call_llm", return_value="CORRECT")
+    @patch("transcribe.call_llm", return_value="CORRECT")
     def test_correct_keeps_map(self, mock_llm):
         speaker_map = {0: "Host", 1: "Guest"}
         ctx = {"Host": "asks questions", "Guest": "answers"}
@@ -977,7 +977,7 @@ class TestVerifySpeakerRolesViaLLM:
         assert result[0] == "Host"
         assert result[1] == "Guest"
 
-    @patch("transcribe_funasr.call_llm", return_value="SWAP")
+    @patch("transcribe.call_llm", return_value="SWAP")
     def test_swap_two_speakers(self, mock_llm):
         speaker_map = {0: "Host", 1: "Guest"}
         ctx = {"Host": "asks questions", "Guest": "answers"}
@@ -985,7 +985,7 @@ class TestVerifySpeakerRolesViaLLM:
         assert result[0] == "Guest"
         assert result[1] == "Host"
 
-    @patch("transcribe_funasr.call_llm", return_value="I'm not sure about this")
+    @patch("transcribe.call_llm", return_value="I'm not sure about this")
     def test_ambiguous_keeps_map(self, mock_llm):
         speaker_map = {0: "Host", 1: "Guest"}
         ctx = {"Host": "asks questions", "Guest": "answers"}
@@ -993,7 +993,7 @@ class TestVerifySpeakerRolesViaLLM:
         assert result[0] == "Host"
         assert result[1] == "Guest"
 
-    @patch("transcribe_funasr.call_llm")
+    @patch("transcribe.call_llm")
     def test_llm_failure_keeps_map(self, mock_llm):
         mock_llm.side_effect = RuntimeError("API error")
         speaker_map = {0: "Host", 1: "Guest"}
@@ -1002,7 +1002,7 @@ class TestVerifySpeakerRolesViaLLM:
         assert result[0] == "Host"
         assert result[1] == "Guest"
 
-    @patch("transcribe_funasr.call_llm")
+    @patch("transcribe.call_llm")
     def test_import_error_propagates(self, mock_llm):
         mock_llm.side_effect = ImportError("No module named 'boto3'")
         speaker_map = {0: "Host", 1: "Guest"}
@@ -1010,7 +1010,7 @@ class TestVerifySpeakerRolesViaLLM:
         with pytest.raises(ImportError):
             tf._verify_speaker_roles_via_llm("text", speaker_map, ctx, "model", "us-west-2")
 
-    @patch("transcribe_funasr.call_llm")
+    @patch("transcribe.call_llm")
     def test_multi_speaker_json_swap(self, mock_llm):
         mock_llm.return_value = json.dumps({
             "correct": False,
@@ -1023,7 +1023,7 @@ class TestVerifySpeakerRolesViaLLM:
         assert result[1] == "Alice"
         assert result[2] == "Carol"
 
-    @patch("transcribe_funasr.call_llm")
+    @patch("transcribe.call_llm")
     def test_multi_speaker_correct(self, mock_llm):
         mock_llm.return_value = json.dumps({
             "correct": True,
@@ -1034,7 +1034,7 @@ class TestVerifySpeakerRolesViaLLM:
         result = tf._verify_speaker_roles_via_llm("text", speaker_map, ctx, "model", "us-west-2")
         assert result[0] == "Alice"
 
-    @patch("transcribe_funasr.call_llm")
+    @patch("transcribe.call_llm")
     def test_multi_speaker_invalid_json_keeps_map(self, mock_llm):
         mock_llm.return_value = "not valid json at all"
         speaker_map = {0: "Alice", 1: "Bob", 2: "Carol"}
@@ -1042,7 +1042,7 @@ class TestVerifySpeakerRolesViaLLM:
         result = tf._verify_speaker_roles_via_llm("text", speaker_map, ctx, "model", "us-west-2")
         assert result == {0: "Alice", 1: "Bob", 2: "Carol"}
 
-    @patch("transcribe_funasr.call_llm")
+    @patch("transcribe.call_llm")
     def test_multi_speaker_three_way_cycle(self, mock_llm):
         mock_llm.return_value = json.dumps({
             "correct": False,
@@ -1055,7 +1055,7 @@ class TestVerifySpeakerRolesViaLLM:
         assert result[1] == "Carol"
         assert result[2] == "Alice"
 
-    @patch("transcribe_funasr.call_llm")
+    @patch("transcribe.call_llm")
     def test_multi_speaker_duplicate_targets_rejected(self, mock_llm):
         mock_llm.return_value = json.dumps({
             "correct": False,
@@ -1180,7 +1180,7 @@ class TestPhase1Flags:
     def _parse(self, extra_args):
         """Parse CLI args with defaults suitable for testing."""
         base = ["test.wav"]
-        with patch("sys.argv", ["transcribe_funasr.py"] + base + extra_args):
+        with patch("sys.argv", ["transcribe.py"] + base + extra_args):
             p = argparse.ArgumentParser()
             p.add_argument("audio_file")
             p.add_argument("--phase1-only", action="store_true")
@@ -1236,7 +1236,7 @@ class TestPhase1Flags:
 
         md_path = tmp_path / "test-transcript.md"
         test_args = [
-            "transcribe_funasr.py",
+            "transcribe.py",
             str(tmp_path / "test.wav"),
             "--phase1-only",
             "--skip-transcribe",
@@ -1259,7 +1259,7 @@ class TestPhase1Flags:
             make_segment(1, 5000, 10000, "World"),
         ]
         with patch("sys.argv", [
-                "transcribe_funasr.py", str(tmp_path / "test.wav"),
+                "transcribe.py", str(tmp_path / "test.wav"),
                 "--json-out", str(custom_json),
                 "--skip-llm", "--device", "cpu",
             ]), \
@@ -1286,7 +1286,7 @@ class TestPhase1Flags:
             return True
 
         with patch("sys.argv", [
-                "transcribe_funasr.py", str(tmp_path / "test.wav"),
+                "transcribe.py", str(tmp_path / "test.wav"),
                 "--skip-llm", "--device", "cpu",
                 "--output", str(output_md),
                 "--json-out", str(raw_json),
@@ -1305,7 +1305,7 @@ class TestPhase1Flags:
         """--json-out to a nonexistent directory exits with code 1."""
         bad_path = tmp_path / "nonexistent" / "dir" / "out.json"
         test_args = [
-            "transcribe_funasr.py",
+            "transcribe.py",
             str(tmp_path / "test.wav"),
             "--json-out", str(bad_path),
             "--device", "cpu",
@@ -1321,7 +1321,7 @@ class TestPhase1Flags:
         with open(raw_json, "w") as f:
             json.dump([], f)
         test_args = [
-            "transcribe_funasr.py",
+            "transcribe.py",
             str(tmp_path / "test.wav"),
             "--phase1-only",
             "--skip-transcribe",
@@ -1341,7 +1341,7 @@ class TestPhase1Flags:
         ]
         custom_json = tmp_path / "phase1_out.json"
         with patch("sys.argv", [
-                "transcribe_funasr.py", str(tmp_path / "test.wav"),
+                "transcribe.py", str(tmp_path / "test.wav"),
                 "--phase1-only",
                 "--json-out", str(custom_json),
                 "--device", "cpu",
@@ -1667,7 +1667,7 @@ class TestFormatGenderLabel:
 
 
 # ──────────────────────────────────────────────
-# transcribe_funasr: gender-aware speaker list rendering
+# transcribe: gender-aware speaker list rendering
 # ──────────────────────────────────────────────
 
 class TestAssembleMarkdownWithGender:

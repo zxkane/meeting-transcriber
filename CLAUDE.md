@@ -5,7 +5,7 @@ using FunASR with speaker diarization and LLM cleanup.
 
 ## Project Structure
 
-- `plugins/funasr-transcriber/` — The plugin source code
+- `plugins/audio-transcriber/` — The plugin source code
 - `.agents/skills/` — Autonomous dev team skills (installed via skills.sh)
 - `.claude/skills/` — Symlinks for Claude Code skill discovery
 - `.claude-plugin/marketplace.json` — skills.sh marketplace registration
@@ -17,10 +17,10 @@ using FunASR with speaker diarization and LLM cleanup.
 - Use `/autonomous-review` skill for PR code review before merging
 - Use `/create-issue` skill for structured GitHub issue creation
 - Use `document-skills:skill-creator` skill to verify/review SKILL.md changes
-- All skill source lives under `plugins/funasr-transcriber/skills/funasr-transcribe/`
+- All skill source lives under `plugins/audio-transcriber/skills/audio-transcribe/`
 - Scripts are in `scripts/`, references in `references/`
 - The main entry point is `SKILL.md`
-- Run tests: `cd plugins/funasr-transcriber/skills/funasr-transcribe/scripts && python3 -m pytest test_speaker_verification.py -v`
+- Run tests: `cd plugins/audio-transcriber/skills/audio-transcribe/scripts && python3 -m pytest test_speaker_verification.py -v`
 
 ## Conventions
 

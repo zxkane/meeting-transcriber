@@ -83,10 +83,10 @@ domain-specific jargon in meetings.
 
 ```bash
 # Space-separated string
-python3 transcribe_funasr.py meeting.wav --lang zh --hotwords "张三 李四 ClawCon Rebase"
+python3 transcribe.py meeting.wav --lang zh --hotwords "张三 李四 ClawCon Rebase"
 
 # Text file (one word per line)
-python3 transcribe_funasr.py meeting.wav --lang zh --hotwords hotwords.txt
+python3 transcribe.py meeting.wav --lang zh --hotwords hotwords.txt
 ```
 
 ### What to include in hotwords
@@ -225,7 +225,7 @@ cat > speaker-context.json << 'EOF'
 EOF
 
 # 3. Run with both
-python3 transcribe_funasr.py meeting.wav \
+python3 transcribe.py meeting.wav \
   --lang zh --num-speakers 3 \
   --speakers "Alice,Bob,Carol" \
   --hotwords hotwords.txt \
@@ -281,10 +281,10 @@ To persist the cache on durable storage (e.g., an EBS data volume):
 
 ```bash
 # Via CLI flag (recommended)
-python3 transcribe_funasr.py meeting.flac --model-cache-dir /data/modelscope-cache ...
+python3 transcribe.py meeting.flac --model-cache-dir /data/modelscope-cache ...
 
 # Via environment variable
-MODELSCOPE_CACHE=/data/modelscope-cache python3 transcribe_funasr.py meeting.flac ...
+MODELSCOPE_CACHE=/data/modelscope-cache python3 transcribe.py meeting.flac ...
 ```
 
 The `systemd-run` examples below include `-E MODELSCOPE_CACHE=...` for this reason.
@@ -327,7 +327,7 @@ systemd-run --user --unit=transcribe-job \
   --working-directory=/tmp \
   -E MODELSCOPE_CACHE=/data/modelscope-cache \
   bash -c 'source /path/to/.venv/bin/activate && \
-    python3 /path/to/transcribe_funasr.py /tmp/meeting.flac \
+    python3 /path/to/transcribe.py /tmp/meeting.flac \
     --lang zh --num-speakers 9 --skip-llm > /tmp/transcribe.log 2>&1'
 
 # Monitor progress
@@ -353,7 +353,7 @@ session — it survives session resets, context pruning, and exec timeouts.
 Option B: `nohup` (works everywhere):
 
 ```bash
-nohup bash -c 'source .venv/bin/activate && python3 transcribe_funasr.py meeting.flac \
+nohup bash -c 'source .venv/bin/activate && python3 transcribe.py meeting.flac \
   --lang zh --num-speakers 9 --skip-llm' > transcribe.log 2>&1 &
 
 echo $!  # Save PID for monitoring
@@ -385,7 +385,7 @@ sudo swapoff /swapfile && sudo rm /swapfile
 (no hotword biasing) but sufficient for most meetings:
 
 ```bash
-python3 transcribe_funasr.py meeting.flac --lang zh-basic --num-speakers 9 --skip-llm
+python3 transcribe.py meeting.flac --lang zh-basic --num-speakers 9 --skip-llm
 ```
 
 **Combining both fixes** (swap + `zh-basic`) reliably handles 4+ hour recordings on
@@ -399,14 +399,14 @@ sudo fallocate -l 4G /swapfile && sudo chmod 600 /swapfile \
   && sudo mkswap /swapfile && sudo swapon /swapfile
 
 # 2. Launch transcription detached from agent timeout
-nohup bash -c 'source .venv/bin/activate && python3 transcribe_funasr.py meeting.flac \
+nohup bash -c 'source .venv/bin/activate && python3 transcribe.py meeting.flac \
   --lang zh-basic --num-speakers 9 --skip-llm' > transcribe.log 2>&1 &
 
 # 3. Monitor
 tail -f transcribe.log
 
 # 4. When done, resume with LLM cleanup (network-bound, runs fine under agent)
-python3 transcribe_funasr.py meeting.flac --skip-transcribe
+python3 transcribe.py meeting.flac --skip-transcribe
 ```
 
 ## Podcast Transcription
@@ -428,20 +428,20 @@ differs from meetings:
 
 ```bash
 # English podcast (2 speakers, host + guest)
-python3 transcribe_funasr.py episode.flac --lang en --num-speakers 2 \
+python3 transcribe.py episode.flac --lang en --num-speakers 2 \
   --speakers "Host,Guest"
 
 # Bilingual podcast (auto-detect language switches)
-python3 transcribe_funasr.py episode.flac --lang auto --num-speakers 2 \
+python3 transcribe.py episode.flac --lang auto --num-speakers 2 \
   --speakers "Alice,Bob"
 
 # Chinese podcast with topic hotwords
-python3 transcribe_funasr.py episode.flac --lang zh --num-speakers 3 \
+python3 transcribe.py episode.flac --lang zh --num-speakers 3 \
   --speakers "主持人,嘉宾A,嘉宾B" \
   --hotwords "播客名 嘉宾全名 讨论主题关键词"
 
 # Multi-language podcast (e.g., Spanish + English)
-python3 transcribe_funasr.py episode.flac --lang whisper --num-speakers 2 \
+python3 transcribe.py episode.flac --lang whisper --num-speakers 2 \
   --speakers "Host,Guest"
 ```
 
@@ -475,7 +475,7 @@ python3 transcribe_funasr.py episode.flac --lang whisper --num-speakers 2 \
 ## `--lang mimo` — Xiaomi MiMo-V2.5-ASR (local, GPU)
 
 MiMo is an 8B-parameter LLM-based ASR model from Xiaomi. It outputs plain text
-with no per-sentence timestamps and no speaker labels. The `funasr-transcribe`
+with no per-sentence timestamps and no speaker labels. The `audio-transcribe`
 skill wraps it in a VAD + speaker-clustering sandwich so output format matches
 the FunASR presets:
 
